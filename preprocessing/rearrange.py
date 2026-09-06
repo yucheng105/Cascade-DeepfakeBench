@@ -494,6 +494,14 @@ def generate_dataset_file(dataset_name, dataset_root_path, output_file_path, com
     ## FakeAVCeleb dataset (visual-only: skip RealVideo-FakeAudio)
     elif dataset_name == 'FakeAVCeleb':
         dataset_path = os.path.join(dataset_root_path, dataset_name)
+        if not os.path.isdir(dataset_path):
+            for candidate in (
+                os.path.join(dataset_root_path, 'FakeAVCeleb_v1.2', 'FakeAVCeleb'),
+                os.path.join(dataset_root_path, 'FakeAVCeleb_v1.2'),
+            ):
+                if os.path.isdir(os.path.join(candidate, 'RealVideo-RealAudio')):
+                    dataset_path = candidate
+                    break
         dataset_dict[dataset_name] = {
             'FakeAVCeleb_real': {'train': {}, 'test': {}, 'val': {}},
             'FakeAVCeleb_fake': {'train': {}, 'test': {}, 'val': {}},

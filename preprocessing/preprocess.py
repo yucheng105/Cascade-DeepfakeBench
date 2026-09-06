@@ -441,6 +441,14 @@ if __name__ == '__main__':
     
     # use dataset_name and dataset_root_path to get dataset_path
     dataset_path = Path(os.path.join(dataset_root_path, dataset_name))
+    if dataset_name == 'FakeAVCeleb' and not dataset_path.exists():
+        for candidate in (
+            Path(dataset_root_path) / 'FakeAVCeleb_v1.2' / 'FakeAVCeleb',
+            Path(dataset_root_path) / 'FakeAVCeleb_v1.2',
+        ):
+            if (candidate / 'RealVideo-RealAudio').exists():
+                dataset_path = candidate
+                break
 
     # Create logger
     log_path = f'./logs/{dataset_name}.log'
