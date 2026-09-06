@@ -1,6 +1,6 @@
 preprocess:
   dataset_name: # the name of dataset
-    choices: ['FaceForensics++','Celeb-DF-v1', 'Celeb-DF-v2', 'DFDCP', 'DFDC', 'DeeperForensics-1.0','UADFV']
+    choices: ['FaceForensics++','Celeb-DF-v1', 'Celeb-DF-v2', 'DFDCP', 'DFDC', 'DeeperForensics-1.0','UADFV','FakeAVCeleb']
     default: 'FaceForensics++'
   dataset_root_path: # the root path to the dataset
     type: str
@@ -20,13 +20,14 @@ preprocess:
 
 rearrange:
   dataset_name: # the name of dataset
-    choices: ['FaceForensics++', 'DeepFakeDetection', 'Celeb-DF-v1', 'Celeb-DF-v2','DFDCP', 'DFDC', 'DeeperForensics-1.0','UADFV','FaceShifter']
+    choices: ['FaceForensics++', 'DeepFakeDetection', 'Celeb-DF-v1', 'Celeb-DF-v2','DFDCP', 'DFDC', 'DeeperForensics-1.0','UADFV','FaceShifter','FakeAVCeleb']
     default: 'FaceForensics++'
   dataset_root_path: # the root path to the dataset
     type: str
-    default: /app/datasets/rgb'
+    default: '/app/datasets/rgb'
   output_file_path: # the json path to the dataset
     type: str
+    # For FakeAVCeleb, set this to '../preprocessing/dataset_json' so training/test.py can find it
     default: '../preprocessing/dataset_json_v6'
   comp: # the compression level of videos, only in the dataset of FaceForensics++.
     choices: ['raw', 'c23', 'c40']

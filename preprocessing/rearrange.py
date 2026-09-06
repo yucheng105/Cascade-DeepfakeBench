@@ -491,6 +491,39 @@ def generate_dataset_file(dataset_name, dataset_root_path, output_file_path, com
                         dataset_dict[dataset_name][label]['test'][video_name] = {'label': label, 'frames': frame_paths}
                         dataset_dict[dataset_name][label]['val'][video_name] = {'label': label, 'frames': frame_paths}
 
+    ## FakeAVCeleb dataset (visual-only: skip RealVideo-FakeAudio)
+    elif dataset_name == 'FakeAVCeleb':
+        dataset_path = os.path.join(dataset_root_path, dataset_name)
+        dataset_dict[dataset_name] = {
+            'FakeAVCeleb_real': {'train': {}, 'test': {}, 'val': {}},
+            'FakeAVCeleb_fake': {'train': {}, 'test': {}, 'val': {}},
+        }
+        folder_to_label = {
+            'RealVideo-RealAudio': 'FakeAVCeleb_real',
+            'FakeVideo-RealAudio': 'FakeAVCeleb_fake',
+            'FakeVideo-FakeAudio': 'FakeAVCeleb_fake',
+        }
+        for folder in os.scandir(dataset_path):
+            if not os.path.isdir(folder):
+                continue
+            if folder.name not in folder_to_label:
+                continue
+            label = folder_to_label[folder.name]
+            frames_root = os.path.join(dataset_path, folder.name, 'frames')
+            if not os.path.isdir(frames_root):
+                continue
+            for video_path in os.scandir(frames_root):
+                if not video_path.is_dir():
+                    continue
+                video_name = video_path.name
+                frame_paths = [os.path.join(video_path, frame.name) for frame in os.scandir(video_path)]
+                if len(frame_paths) == 0:
+                    continue
+                video_entry = {'label': label, 'frames': frame_paths}
+                dataset_dict[dataset_name][label]['train'][video_name] = video_entry
+                dataset_dict[dataset_name][label]['test'][video_name] = video_entry
+                dataset_dict[dataset_name][label]['val'][video_name] = video_entry
+
     # Convert the dataset dictionary to JSON format and save to file
     output_file_path = os.path.join(output_file_path, dataset_name + '.json')
     with open(output_file_path, 'w') as f:

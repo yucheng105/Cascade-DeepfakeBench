@@ -206,13 +206,20 @@ def extract_aligned_face_dlib(face_detector, predictor, image, res=256, mask=Non
     else:
         return None, None, None
 
+def unique_frame_dirname(movie_path: Path, dataset_path: Path) -> str:
+    """Build a collision-resistant folder name from the path relative to the sub-dataset."""
+    relative_path = movie_path.relative_to(dataset_path)
+    return str(relative_path.with_suffix('')).replace('\\', '_').replace('/', '_')
+
+
 def video_manipulate(
     movie_path: Path,
     mask_path: Path,
     dataset_path: Path,
     mode: str,
     num_frames: int, 
-    stride: int, 
+    stride: int,
+    frame_dirname: str = None,
     ) -> None:
     """
     Processes a single video file by detecting and cropping the largest face in each frame and saving the results.
@@ -319,7 +326,8 @@ def video_manipulate(
                 continue
 
             # Save cropped face, landmarks, and visualization image
-            save_path_ = save_path / 'frames' / org_path.stem
+            clip_name = frame_dirname or org_path.stem
+            save_path_ = save_path / 'frames' / clip_name
             save_path_.mkdir(parents=True, exist_ok=True)
 
             # Save cropped face
@@ -328,13 +336,13 @@ def video_manipulate(
                 cv2.imwrite(str(image_path), cropped_face)
 
             # Save landmarks
-            land_path = save_path / 'landmarks' / org_path.stem / f"{cnt_frame:03d}.npy"
+            land_path = save_path / 'landmarks' / clip_name / f"{cnt_frame:03d}.npy"
             os.makedirs(os.path.dirname(land_path), exist_ok=True)
             np.save(str(land_path), landmarks)
 
             # Save mask
             if mask_path is not None:
-                mask_path = save_path / 'masks' / org_path.stem / f"{cnt_frame:03d}.png"
+                mask_path = save_path / 'masks' / clip_name / f"{cnt_frame:03d}.png"
                 os.makedirs(os.path.dirname(mask_path), exist_ok=True)
                 _, binary_mask = cv2.threshold(masks, 1, 255, cv2.THRESH_BINARY)  # obtain binary mask only
                 cv2.imwrite(str(mask_path), binary_mask)
@@ -351,7 +359,7 @@ def video_manipulate(
         logger.error(f"Error processing video {movie_path}: {e}")
 
 
-def preprocess(dataset_path, mask_path, mode, num_frames, stride, logger):
+def preprocess(dataset_path, mask_path, mode, num_frames, stride, logger, use_unique_frame_dirname=False):
     # Define paths to videos in dataset
     movies_path_list = sorted([Path(p) for p in glob.glob(os.path.join(dataset_path, '**/*.mp4'), recursive=True)])
     if len(movies_path_list) == 0:
@@ -385,6 +393,7 @@ def preprocess(dataset_path, mask_path, mode, num_frames, stride, logger):
                 mask_path = next((path for path in masks_path_list if path.stem == movie_path.stem), None)
                 if mask_path is None:
                     logger.error(f"Mask path not found for video {movie_path}")
+            clip_name = unique_frame_dirname(movie_path, dataset_path) if use_unique_frame_dirname else None
             # Create a future for each video and submit it for processing
             futures.append(
                 executor.submit(
@@ -395,6 +404,7 @@ def preprocess(dataset_path, mask_path, mode, num_frames, stride, logger):
                 mode,
                 num_frames,
                 stride,
+                clip_name,
                 )
             )
         # Wait for all futures to complete and log any errors
@@ -486,6 +496,14 @@ if __name__ == '__main__':
     elif dataset_name == 'UADFV':
         sub_dataset_names = ['fake', 'real']
         sub_dataset_paths = [Path(os.path.join(dataset_path, name)) for name in sub_dataset_names]
+    ## FakeAVCeleb (visual-only: skip RealVideo-FakeAudio)
+    elif dataset_name == 'FakeAVCeleb':
+        sub_dataset_names = [
+            'RealVideo-RealAudio',
+            'FakeVideo-RealAudio',
+            'FakeVideo-FakeAudio',
+        ]
+        sub_dataset_paths = [Path(os.path.join(dataset_path, name)) for name in sub_dataset_names]
     else:
         raise ValueError(f"Dataset {dataset_name} not recognized")
     
@@ -507,7 +525,15 @@ if __name__ == '__main__':
                 mask_dataset_path = os.path.join(sub_dataset_path.parent, "masks")
                 preprocess(sub_dataset_path, mask_dataset_path, mode, num_frames, stride, logger)
             else:
-                preprocess(sub_dataset_path, None, mode, num_frames, stride, logger)
+                preprocess(
+                    sub_dataset_path,
+                    None,
+                    mode,
+                    num_frames,
+                    stride,
+                    logger,
+                    use_unique_frame_dirname=(dataset_name == 'FakeAVCeleb'),
+                )
     else:
         logger.error(f"Sub Dataset path does not exist: {sub_dataset_paths}")
         sys.exit()
