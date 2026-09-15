@@ -65,16 +65,13 @@ class SBIDetector(AbstractDetector):
     def build_backbone(self, config):
         # prepare the backbone
         backbone_class = BACKBONE[config['backbone_name']]
-        model_config = config['backbone_config']
+        model_config = config['backbone_config'].copy()
+        pretrained = config.get('pretrained')
+        if pretrained and not os.path.isfile(pretrained):
+            raise FileNotFoundError(f'EfficientNet-B4 weights not found: {pretrained}')
+        model_config['pretrained'] = pretrained
         backbone = backbone_class(model_config)
-        # if donot load the pretrained weights, fail to get good results
-        state_dict = torch.load(config['pretrained'])
-        for name, weights in state_dict.items():
-            if 'pointwise' in name:
-                state_dict[name] = weights.unsqueeze(-1).unsqueeze(-1)
-        state_dict = {k:v for k, v in state_dict.items() if 'fc' not in k}
-        backbone.load_state_dict(state_dict, False)
-        logger.info('Load pretrained model successfully!')
+        logger.info('EfficientNet-B4 initialized %s pretrained weights.', 'with' if pretrained else 'without')
         return backbone
 
     def build_loss(self, config):

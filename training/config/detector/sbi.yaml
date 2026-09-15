@@ -2,17 +2,16 @@
 log_dir: /data/home/zhiyuanyan/logs/benchv2/sbi_v3
 
 # model setting
-pretrained: /data/home/zhiyuanyan/DeepfakeBench/training/pretrained/xception-b5690688.pth   # path to a pre-trained model, if using one
+pretrained: null  # set to an EfficientNet-B4 weights path when available
 model_name: sbi   # model name
 backbone_name: efficientnetb4  # backbone name
 
 #backbone setting
 backbone_config:
   mode: original
-  num_classes: 3
+  num_classes: 2
   inc: 3
   dropout: false
-  pretrained: true
 
 # dataset
 all_dataset: [FaceForensics++, FF-F2F, FF-DF, FF-FS, FF-NT, FaceShifter, DeepFakeDetection, Celeb-DF-v1, Celeb-DF-v2, DFDCP, DFDC, DeeperForensics-1.0, UADFV]
