@@ -119,6 +119,8 @@ The implementation of more detection methods, as well as their evaluations, are 
 
 ## ⏳ Quick Start
 
+Project-specific SBI setup, training, and evaluation instructions are collected in [docs/sbi/SBI 啟動方式.md](./docs/sbi/SBI%20啟動方式.md).
+
 ### 1. Installation
 (option 1) You can run the following script to configure the necessary environment:
 

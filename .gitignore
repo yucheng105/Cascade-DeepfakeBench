@@ -9,3 +9,6 @@
 # Ignore all contents under datasets/
 datasets/rgb/*
 .venv/
+
+# Local training and evaluation artifacts
+logs/

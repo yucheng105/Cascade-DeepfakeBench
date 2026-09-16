@@ -40,6 +40,11 @@ parser = argparse.ArgumentParser(description='Process some paths.')
 parser.add_argument('--detector_path', type=str,
                     default='/data/home/zhiyuanyan/DeepfakeBenchv2/training/config/detector/sbi.yaml',
                     help='path to detector YAML file')
+parser.add_argument('--train_config_path', type=str,
+                    default='./training/config/train_config.yaml',
+                    help='path to training YAML file')
+parser.add_argument('--pretrained', type=str,
+                    help='path to backbone pretrained weights')
 parser.add_argument("--train_dataset", nargs="+")
 parser.add_argument("--test_dataset", nargs="+")
 parser.add_argument('--no-save_ckpt', dest='save_ckpt', action='store_false', default=True)
@@ -227,9 +232,14 @@ def main():
         config = yaml.safe_load(f)
     with open('./training/config/train_config.yaml', 'r') as f:
         config2 = yaml.safe_load(f)
+    if args.train_config_path != './training/config/train_config.yaml':
+        with open(args.train_config_path, 'r') as f:
+            config2.update(yaml.safe_load(f))
     if 'label_dict' in config:
         config2['label_dict']=config['label_dict']
     config.update(config2)
+    if args.pretrained:
+        config['pretrained'] = args.pretrained
     config['local_rank']=args.local_rank
     if config['dry_run']:
         config['nEpochs'] = 0

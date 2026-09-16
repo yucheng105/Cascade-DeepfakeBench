@@ -1,0 +1,9 @@
+# Overrides for a complete, short FF++ SBI training run.
+dataset_json_folder: './preprocessing/dataset_json_smoke'
+log_dir: './logs/training-smoke'
+train_batchSize: 2
+test_batchSize: 4
+workers: 0
+frame_num: {'train': 1, 'test': 1}
+nEpochs: 0
+save_avg: true

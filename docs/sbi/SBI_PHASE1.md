@@ -39,4 +39,4 @@ Dataset check passed: real/SBI pair and landmark available
 
 ## 目前驗收狀態
 
-設定與檢查程式已加入工作區，但執行驗收**尚未通過**。目前 training/pretrained 和 datasets 只有說明檔，本機 python 也無法匯入 torch 或 yaml，所以尚未實際載入模型或生成樣本。備妥環境後，檢查程式顯示兩項成功訊息，才算 Phase 1 通過；進入 Phase 2 正式訓練前，建議再用相容的預訓練權重跑一次檢查。
+Phase 1 已使用 RGB 資料與 EfficientNet-B4 預訓練權重通過模型及資料檢查，後續也已完成 smoke run。正式訓練前若更換資料路徑、JSON、環境或權重，應重新執行檢查並確認兩項成功訊息。

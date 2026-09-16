@@ -10,6 +10,9 @@ import datetime
 import time
 import yaml
 import pickle
+import csv
+import json
+from pathlib import Path
 from tqdm import tqdm
 from copy import deepcopy
 from PIL import Image as pil_image
@@ -42,6 +45,8 @@ parser.add_argument('--detector_path', type=str,
 parser.add_argument("--test_dataset", nargs="+")
 parser.add_argument('--weights_path', type=str, 
                     default='/mntcephfs/lab_data/zhiyuanyan/benchmark_results/auc_draw/cnn_aug/resnet34_2023-05-20-16-57-22/test/FaceForensics++/ckpt_epoch_9_best.pth')
+parser.add_argument('--output_dir', type=str, default='./logs/testing',
+                    help='directory for prediction CSV and metric JSON files')
 #parser.add_argument("--lmdb", action='store_true', default=False)
 args = parser.parse_args()
 
@@ -51,6 +56,7 @@ def init_seed(config):
     if config['manualSeed'] is None:
         config['manualSeed'] = random.randint(1, 10000)
     random.seed(config['manualSeed'])
+    np.random.seed(config['manualSeed'])
     torch.manual_seed(config['manualSeed'])
     if config['cuda']:
         torch.cuda.manual_seed_all(config['manualSeed'])
@@ -121,12 +127,14 @@ def test_one_dataset(model, data_loader):
     return np.array(prediction_lists), np.array(label_lists),np.array(feature_lists)
 
 # 控制「要測哪些 dataset」
-def test_epoch(model, test_data_loaders):
+def test_epoch(model, test_data_loaders, output_dir):
     # set model to eval mode
     model.eval()
 
     # define test recorder
     metrics_all_datasets = {}
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
 
     # get names for all testing datasets
     keys = test_data_loaders.keys()
@@ -140,11 +148,25 @@ def test_epoch(model, test_data_loaders):
         metric_one_dataset = get_test_metrics(y_pred=predictions_nps, y_true=label_nps,
                                               img_names=data_dict['image'])
         metrics_all_datasets[key] = metric_one_dataset
+
+        prediction_path = output_path / f'{key}_predictions.csv'
+        with prediction_path.open('w', newline='', encoding='utf-8') as file:
+            writer = csv.writer(file)
+            writer.writerow(['image_path', 'label', 'probability'])
+            writer.writerows(zip(data_dict['image'], label_nps.tolist(),
+                                 np.asarray(predictions_nps).reshape(-1).tolist()))
+        metric_path = output_path / f'{key}_metrics.json'
+        scalar_metrics = {name: float(value) for name, value in metric_one_dataset.items()
+                          if name not in ('pred', 'label')}
+        with metric_path.open('w', encoding='utf-8') as file:
+            json.dump(scalar_metrics, file, indent=2, sort_keys=True)
         
         # info for each dataset
         tqdm.write(f"dataset: {key}")
-        for k, v in metric_one_dataset.items():
+        for k, v in scalar_metrics.items():
             tqdm.write(f"{k}: {v}")
+        tqdm.write(f"Predictions saved to {prediction_path}")
+        tqdm.write(f"Metrics saved to {metric_path}")
 
     return metrics_all_datasets
 
@@ -176,8 +198,8 @@ def main():
     init_seed(config)
 
     # set cudnn benchmark if needed
-    if config['cudnn']:
-        cudnn.benchmark = True
+    cudnn.benchmark = False
+    cudnn.deterministic = True
 
     # prepare the testing data loader
     test_data_loaders = prepare_testing_data(config)
@@ -192,14 +214,14 @@ def main():
         except:
             epoch = 0
         # load the pre-trained weights
-        ckpt = torch.load(weights_path, map_location=device)
+        ckpt = torch.load(weights_path, map_location=device, weights_only=True)
         model.load_state_dict(ckpt, strict=True)
         print('===> Load checkpoint done!')
     else:
         print('Fail to load the pre-trained weights')
     
     # start testing
-    best_metric = test_epoch(model, test_data_loaders)
+    best_metric = test_epoch(model, test_data_loaders, args.output_dir)
     print('===> Test Done!')
 
 if __name__ == '__main__':
