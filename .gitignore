@@ -8,3 +8,4 @@
 
 # Ignore all contents under datasets/
 datasets/rgb/*
+.venv/
