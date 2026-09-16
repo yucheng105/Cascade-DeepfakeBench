@@ -16,8 +16,8 @@
   ~~~
 
   實際影片與影格編號可以不同，但同一影格的 `frames`、`landmarks` 子路徑和檔名必須一致（副檔名分別為 `.png`、`.npy`）。landmark 應為 81 點資料；SBI 資料集會用真實影格即時產生假影格。若後續要在同一資料集測試，也須準備對應的假影格資料。
-- [ ] 從 [DeepfakeBench 提供的 JSON 設定資料](https://drive.google.com/drive/folders/1ZV3fz5MZZU5BTB5neziN6i8Yv0Z21_LO?usp=drive_link) 取得 `FaceForensics++.json`，放至 `preprocessing/dataset_json/FaceForensics++.json`。確認其中包含 `FaceForensics++`、`FF-real`、`train`、`c23` 的資料，且記錄的影格路徑在助教電腦上確實存在。
-- [ ] 使用 RGB 資料時，將 `training/config/train_config.yaml` 的 `lmdb` 從 `True` 改為 `False`；`rgb_dir` 應指向 `./datasets/rgb`，`dataset_json_folder` 應指向 `./preprocessing/dataset_json`。若資料放在其他磁碟，改成實際路徑。
+- [x] 從 [DeepfakeBench 提供的 JSON 設定資料](https://drive.google.com/drive/folders/1ZV3fz5MZZU5BTB5neziN6i8Yv0Z21_LO?usp=drive_link) 取得 `FaceForensics++.json`，放至 `preprocessing/dataset_json/FaceForensics++.json`。確認其中包含 `FaceForensics++`、`FF-real`、`train`、`c23` 的資料，且記錄的影格路徑在助教電腦上確實存在。
+- [x] 使用 RGB 資料時，將 `training/config/train_config.yaml` 的 `lmdb` 從 `True` 改為 `False`；`rgb_dir` 應指向 `./datasets/rgb`，`dataset_json_folder` 應指向 `./preprocessing/dataset_json`。若資料放在其他磁碟，改成實際路徑。
 - [ ] 在專案根目錄執行 Phase 1 資料與模型檢查：
 
   ~~~powershell
