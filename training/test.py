@@ -122,7 +122,7 @@ def test_one_dataset(model, data_loader):
         predictions = inference(model, data_dict)
         label_lists += list(data_dict['label'].cpu().detach().numpy())
         prediction_lists += list(predictions['prob'].cpu().detach().numpy())
-        feature_lists += list(predictions['feat'].cpu().detach().numpy())
+        # feature_lists += list(predictions['feat'].cpu().detach().numpy())     # 先不保留特徵，個人電腦記憶體不足
     
     return np.array(prediction_lists), np.array(label_lists),np.array(feature_lists)
 
@@ -214,7 +214,8 @@ def main():
         except:
             epoch = 0
         # load the pre-trained weights
-        ckpt = torch.load(weights_path, map_location=device, weights_only=True)
+        # ckpt = torch.load(weights_path, map_location=device, weights_only=True)
+        ckpt = torch.load(weights_path, map_location=device)
         model.load_state_dict(ckpt, strict=True)
         print('===> Load checkpoint done!')
     else:
