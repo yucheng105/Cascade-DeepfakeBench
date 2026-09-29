@@ -38,6 +38,21 @@ from collections import defaultdict
 import argparse
 from logger import create_logger
 
+PREDICTION_CSV_COLUMNS = [
+    'sample_id',
+    'dataset',
+    'label',
+    'detector_name',
+    'modality',
+    'fake_score',
+    'score_type',
+    'inference_time_ms',
+    'window_start_sec',
+    'window_end_sec',
+    'status',
+    'error_message',
+]
+
 parser = argparse.ArgumentParser(description='Process some paths.')
 parser.add_argument('--detector_path', type=str, 
                     default='/home/zhiyuanyan/DeepfakeBench/training/config/detector/resnet34.yaml',
@@ -101,6 +116,7 @@ def test_one_dataset(model, data_loader):
     prediction_lists = []   # fake score
     feature_lists = []      # feature vector
     label_lists = []        # ground truth labels
+    inference_time_lists = []  # model-forward time allocated to each item
     # 一個 dataloader 是一個 batch
     for i, data_dict in tqdm(enumerate(data_loader), total=len(data_loader)):
         # get data
@@ -119,15 +135,112 @@ def test_one_dataset(model, data_loader):
 
         # model forward without considering gradient computation
         # inference 結果移併回傳到 predictions dict
+        # Synchronization is needed for meaningful CUDA timings. Data loading and
+        # host-to-device copies are intentionally excluded from inference time.
+        if device.type == 'cuda':
+            torch.cuda.synchronize(device)
+        start_time = time.perf_counter()
         predictions = inference(model, data_dict)
+        if device.type == 'cuda':
+            torch.cuda.synchronize(device)
+        batch_inference_time_ms = (time.perf_counter() - start_time) * 1000.0
+        batch_size = int(data_dict['label'].shape[0])
+        inference_time_lists.extend([batch_inference_time_ms / batch_size] * batch_size)
         label_lists += list(data_dict['label'].cpu().detach().numpy())
         prediction_lists += list(predictions['prob'].cpu().detach().numpy())
         # feature_lists += list(predictions['feat'].cpu().detach().numpy())     # 先不保留特徵，個人電腦記憶體不足
     
-    return np.array(prediction_lists), np.array(label_lists),np.array(feature_lists)
+    return (np.array(prediction_lists), np.array(label_lists),
+            np.array(feature_lists), np.array(inference_time_lists))
 
 # 控制「要測哪些 dataset」
-def test_epoch(model, test_data_loaders, output_dir):
+def sample_id_from_image_path(image_path):
+    """Return the source video filename stem represented by a frame path."""
+    if isinstance(image_path, (list, tuple)):
+        if not image_path:
+            raise ValueError('Cannot derive sample_id from an empty frame list.')
+        image_path = image_path[0]
+
+    normalized_path = str(image_path).replace('\\', '/').rstrip('/')
+    path_parts = normalized_path.split('/')
+    if len(path_parts) < 2:
+        raise ValueError('Cannot derive sample_id from path: {}'.format(image_path))
+    return path_parts[-2]
+
+
+def aggregate_video_predictions(data_dict, predictions, labels, inference_times_ms,
+                                dataset_name, detector_name):
+    """Aggregate frame/clip predictions into one CSV row per source video."""
+    predictions = np.asarray(predictions).reshape(-1)
+    labels = np.asarray(labels).reshape(-1)
+    inference_times_ms = np.asarray(inference_times_ms).reshape(-1)
+    image_paths = data_dict['image']
+    video_names = data_dict['video_name']
+
+    lengths = {
+        len(predictions), len(labels), len(inference_times_ms),
+        len(image_paths), len(video_names),
+    }
+    if len(lengths) != 1:
+        raise ValueError(
+            'Predictions, labels, timings, image paths, and video names must be aligned.'
+        )
+
+    videos = {}
+    for video_name, image_path, prediction, label, elapsed_ms in zip(
+            video_names, image_paths, predictions, labels, inference_times_ms):
+        binary_label = int(label != 0)
+        sample_id = sample_id_from_image_path(image_path)
+        if video_name not in videos:
+            videos[video_name] = {
+                'sample_id': sample_id,
+                'label': binary_label,
+                'scores': [],
+                'inference_times_ms': [],
+            }
+        elif videos[video_name]['label'] != binary_label:
+            raise ValueError('Inconsistent labels for video: {}'.format(video_name))
+        elif videos[video_name]['sample_id'] != sample_id:
+            raise ValueError('Inconsistent sample IDs for video: {}'.format(video_name))
+
+        videos[video_name]['scores'].append(float(prediction))
+        videos[video_name]['inference_times_ms'].append(float(elapsed_ms))
+
+    rows = []
+    for video_name, video in videos.items():
+        rows.append({
+            'sample_id': video['sample_id'],
+            'dataset': dataset_name,
+            'label': video['label'],
+            'detector_name': detector_name,
+            'modality': 'visual',
+            'fake_score': float(np.mean(video['scores'])),
+            'score_type': 'probability',
+            'inference_time_ms': float(np.sum(video['inference_times_ms'])),
+            'window_start_sec': '',
+            'window_end_sec': '',
+            'status': 'ok',
+            'error_message': '',
+            '_video_name': video_name,
+        })
+
+    # The dataset class shuffles test items. Sort here so repeated runs produce
+    # stable CSVs: real first, then fake; FF++ manipulation groups stay distinct.
+    rows.sort(key=lambda row: (row['label'], row['_video_name']))
+    for row in rows:
+        del row['_video_name']
+    return rows
+
+
+def write_prediction_csv(prediction_path, rows):
+    with prediction_path.open('w', newline='', encoding='utf-8') as file:
+        writer = csv.DictWriter(file, fieldnames=PREDICTION_CSV_COLUMNS)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+# Test each configured dataset and write one video-level CSV per dataset.
+def test_epoch(model, test_data_loaders, output_dir, detector_name):
     # set model to eval mode
     model.eval()
 
@@ -142,7 +255,8 @@ def test_epoch(model, test_data_loaders, output_dir):
         # get the data dictionary for the current dataset
         data_dict = test_data_loaders[key].dataset.data_dict
         # compute loss for each dataset
-        predictions_nps, label_nps,feat_nps = test_one_dataset(model, test_data_loaders[key])
+        predictions_nps, label_nps, feat_nps, inference_time_nps = \
+            test_one_dataset(model, test_data_loaders[key])
         
         # compute metric for each dataset
         metric_one_dataset = get_test_metrics(y_pred=predictions_nps, y_true=label_nps,
@@ -150,11 +264,15 @@ def test_epoch(model, test_data_loaders, output_dir):
         metrics_all_datasets[key] = metric_one_dataset
 
         prediction_path = output_path / f'{key}_predictions.csv'
-        with prediction_path.open('w', newline='', encoding='utf-8') as file:
-            writer = csv.writer(file)
-            writer.writerow(['image_path', 'label', 'probability'])
-            writer.writerows(zip(data_dict['image'], label_nps.tolist(),
-                                 np.asarray(predictions_nps).reshape(-1).tolist()))
+        prediction_rows = aggregate_video_predictions(
+            data_dict=data_dict,
+            predictions=predictions_nps,
+            labels=label_nps,
+            inference_times_ms=inference_time_nps,
+            dataset_name=key,
+            detector_name=detector_name,
+        )
+        write_prediction_csv(prediction_path, prediction_rows)
         metric_path = output_path / f'{key}_metrics.json'
         scalar_metrics = {name: float(value) for name, value in metric_one_dataset.items()
                           if name not in ('pred', 'label')}
@@ -165,7 +283,7 @@ def test_epoch(model, test_data_loaders, output_dir):
         tqdm.write(f"dataset: {key}")
         for k, v in scalar_metrics.items():
             tqdm.write(f"{k}: {v}")
-        tqdm.write(f"Predictions saved to {prediction_path}")
+        tqdm.write(f"Predictions saved to {prediction_path} ({len(prediction_rows)} videos)")
         tqdm.write(f"Metrics saved to {metric_path}")
 
     return metrics_all_datasets
@@ -222,7 +340,9 @@ def main():
         print('Fail to load the pre-trained weights')
     
     # start testing
-    best_metric = test_epoch(model, test_data_loaders, args.output_dir)
+    best_metric = test_epoch(
+        model, test_data_loaders, args.output_dir, config['model_name']
+    )
     print('===> Test Done!')
 
 if __name__ == '__main__':
