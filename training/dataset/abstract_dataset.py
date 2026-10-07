@@ -534,7 +534,8 @@ class DeepfakeAbstractBaseDataset(data.Dataset):
             if not no_norm:
                 image_trans = self.normalize(self.to_tensor(image_trans))
                 if self.config['with_landmark']:
-                    landmarks_trans = torch.from_numpy(landmarks)
+                    landmarks_trans = torch.from_numpy(
+                        landmarks.astype(np.float32))
                 if self.config['with_mask']:
                     mask_trans = torch.from_numpy(mask_trans)
 

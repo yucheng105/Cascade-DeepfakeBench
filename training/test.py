@@ -334,7 +334,21 @@ def main():
         # load the pre-trained weights
         # ckpt = torch.load(weights_path, map_location=device, weights_only=True)
         ckpt = torch.load(weights_path, map_location=device)
-        model.load_state_dict(ckpt, strict=True)
+
+        # for sbi .tar weights
+        if config['model_name'] == 'sbi':
+            # Map the downloaded SBI checkpoint to this detector's parameter names.
+            state_dict = ckpt["model"]
+            mapped = {}
+            for key, value in state_dict.items():
+                if key.startswith("net._fc."):
+                    key = key.replace("net._fc.", "backbone.last_layer.", 1)
+                elif key.startswith("net."):
+                    key = key.replace("net.", "backbone.efficientnet.", 1)
+                mapped[key] = value
+            model.load_state_dict(mapped, strict=True)
+        else:
+            model.load_state_dict(ckpt, strict=True)
         print('===> Load checkpoint done!')
     else:
         print('Fail to load the pre-trained weights')

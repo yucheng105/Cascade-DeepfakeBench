@@ -5,6 +5,7 @@
 *.pth
 *.pt
 *.dat
+*.tar
 
 # Ignore all contents under datasets/
 datasets/rgb/*
