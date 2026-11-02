@@ -1,5 +1,61 @@
 # Cascade pipeline
 
+## Offline MP4 demo (Phase 2 extension)
+
+From the workspace root, double-click `Start_Offline_Demo.cmd`, or from this
+repository root run:
+
+```powershell
+.\.venv\Scripts\python.exe -B -m cascade.demo --open-browser
+```
+
+Open http://127.0.0.1:8765, choose an MP4, select Early Exit or all-stage demo,
+acknowledge exploratory mode, and start. The page shows video playback, sampled
+face previews, per-stage scores/thresholds/decisions, skipped stages, timing and
+JSON/CSV downloads. Jobs survive restart; inputs/results are stored under the
+workspace's `data/video_demo_runs/`, not inside the source tree. Keep one server
+running per port. Stop an interactive server with Ctrl+C.
+
+Single-video CLI uses the same pipeline:
+
+```powershell
+.\.venv\Scripts\python.exe -B -m cascade.video --video C:/path/to/video.mp4 --output ../data/my_new_video_run --allow-exploratory --device cuda
+```
+
+Use `--policy cascade/policies/uploaded_video_all_stages.json` to demonstrate
+three-stage reachability. Exact endpoint scores still follow normal routing.
+Outputs require a new directory. Default: max 200 MiB, 120 seconds, 2073600
+pixels/frame (1920×1080 total), 240 fps and 32 unique uniformly sampled frames.
+Decode metadata must agree with actual decoded frames. Crop failures are counted;
+no valid faces, invalid/truncated input or model failures produce an explicit
+failure without a REAL/FAKE result. CPU is opt-in via `--device cpu`.
+
+Extra face model setup, once (no implicit download at inference time):
+
+```powershell
+.\.venv\Scripts\python.exe -B -m cascade.download_face_model
+```
+
+YuNet is pinned by SHA-256, 232589 bytes, from official OpenCV Zoo. Source and MIT
+license are in `assets/`. Five-point similarity alignment uses a padded 256 crop;
+only the largest detected face per sample is analyzed, with no identity tracking.
+This new profile and uniform sampling are distinct from the existing dataset
+runner's first-N crops and from official SBI/raw-video or historical CSV pipelines.
+
+Uploaded videos use `dataset_id=uploaded_video`, unknown labels (`null`) and
+`deployment_ready=false` policies. ACC/FAR/FRR/confusion counts remain `null`;
+the UI does not invent Ground Truth or call fake score a calibrated confidence.
+Adapters pass a zero placeholder tensor only to satisfy detector forward APIs;
+UCF metric accumulation is explicitly disabled (`track_metrics=false`), including
+warmup. Legacy UCF callers retain metric tracking by default.
+
+No new inference package is required beyond the existing runtime environment.
+Optional `requirements-demo-tools.txt` installs imageio-ffmpeg only for encoding
+the derivative engineering smoke sample; it is not needed for user MP4 uploads.
+The demo is bound to localhost, handles one job at a time and is not a production
+multiuser service. For demo steps and acceptance evidence see workspace
+`docs/phase2_video_demo.md`.
+
 ## Phase 2: policy-driven offline runtime
 
 The new entry point is `python -m cascade.offline`; the existing `cascade/test.py`

@@ -12,7 +12,9 @@ from .video_scoring import VideoScoreAccumulator
 
 class FrameDetectorAdapter:
     def __init__(self, name: str, config_path: Path, checkpoint_path: Path, device,
-                 batch_size: int = 16, warmup: bool = True):
+                 batch_size: int = 16, warmup: bool = True, *,
+                 sampling: str = 'first_N_numeric_sorted_frames',
+                 input_profile: str = 'preprocessed_face_crops'):
         import yaml
         self.name=name
         self.config=yaml.safe_load(config_path.read_text(encoding='utf-8'))
@@ -29,7 +31,7 @@ class FrameDetectorAdapter:
             raise ValueError('Unsupported resize interpolation')
         profile=dict(resolution=self.config['resolution'],mean=self.config['mean'],std=self.config['std'],
                      resize='opencv_INTER_'+interpolation.upper(),color='RGB',aggregation='mean_frame_probability',
-                     input='preprocessed_face_crops',sampling='first_N_numeric_sorted_frames')
+                     input=input_profile,sampling=sampling)
         if len(profile['mean'])!=3 or len(profile['std'])!=3 or any(x<=0 for x in profile['std']):
             raise ValueError('Invalid detector normalization')
         self.provenance=dict(detector=name,checkpoint=str(self.checkpoint),checkpoint_sha256=sha256(self.checkpoint),
@@ -74,15 +76,18 @@ class FrameDetectorAdapter:
                 if self.warmup:
                     began=time.perf_counter()
                     dummy=torch.zeros(1,3,self.config['resolution'],self.config['resolution'],device=device)
-                    model({'image':dummy,'label':torch.zeros(1,dtype=torch.long,device=device)},inference=True)
+                    model({'image':dummy,'label':torch.zeros(1,dtype=torch.long,device=device),
+                           'track_metrics':False},inference=True)
                     synchronize();warmup_seconds=time.perf_counter()-began
                 frames=[(path,r['label'],r['video_name']) for r in records for path in r['frames']]
                 for offset in range(0,len(frames),self.batch_size):
                     batch=frames[offset:offset+self.batch_size]
                     images=torch.stack([self._image(path) for path,_,_ in batch]).to(device)
-                    labels=torch.tensor([label for _,label,_ in batch],dtype=torch.long,device=device)
+                    # Model forward requires a tensor; this placeholder is NOT Ground Truth.
+                    labels=torch.tensor([0 if label is None else label for _,label,_ in batch],
+                                        dtype=torch.long,device=device)
                     synchronize();began=time.perf_counter()
-                    output=model({'image':images,'label':labels},inference=True)
+                    output=model({'image':images,'label':labels,'track_metrics':False},inference=True)
                     synchronize();elapsed=time.perf_counter()-began
                     forward_seconds+=elapsed
                     for _,_,video_name in batch:

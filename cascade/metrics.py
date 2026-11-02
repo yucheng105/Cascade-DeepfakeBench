@@ -9,7 +9,7 @@ def operational_auc(video_scores):
     """
     from sklearn.metrics import roc_auc_score
     labels = [video.label for video in video_scores]
-    if len(set(labels)) < 2:
+    if any(label is None for label in labels) or len(set(labels)) < 2:
         return None
     scores = [video.score for video in video_scores]
     return float(roc_auc_score(labels, scores))

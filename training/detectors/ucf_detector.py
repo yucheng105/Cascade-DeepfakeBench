@@ -241,26 +241,15 @@ class UCFDetector(AbstractDetector):
             out_sha, sha_feat = self.head_sha(f_share)
             out_spe, spe_feat = self.head_spe(f_spe)
             prob_sha = torch.softmax(out_sha, dim=1)[:, 1]
-            self.prob.append(
-                prob_sha
-                .detach()
-                .squeeze()
-                .cpu()
-                .numpy()
-            )
-            self.label.append(
-                data_dict['label']
-                .detach()
-                .squeeze()
-                .cpu()
-                .numpy()
-            )
-            # deal with acc
-            _, prediction_class = torch.max(out_sha, 1)
-            common_label = (data_dict['label'] >= 1)
-            correct = (prediction_class == common_label).sum().item()
-            self.correct += correct
-            self.total += data_dict['label'].size(0)
+            # Pure runtime inference can carry unknown Ground Truth. Preserve legacy default.
+            if data_dict.get('track_metrics', True):
+                self.prob.append(prob_sha.detach().squeeze().cpu().numpy())
+                self.label.append(data_dict['label'].detach().squeeze().cpu().numpy())
+                _, prediction_class = torch.max(out_sha, 1)
+                common_label = (data_dict['label'] >= 1)
+                correct = (prediction_class == common_label).sum().item()
+                self.correct += correct
+                self.total += data_dict['label'].size(0)
 
             pred_dict = {'cls': out_sha, 'prob': prob_sha, 'feat': sha_feat}
             return  pred_dict

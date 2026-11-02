@@ -15,7 +15,7 @@ class VideoScore:
     """Arithmetic mean of all sampled frame scores for one video."""
 
     video_name: str
-    label: int
+    label: int | None
     score: float
     frame_count: int
 
@@ -25,7 +25,7 @@ class RoutedVideo:
     """A video score and its decision at one cascade stage."""
 
     video_name: str
-    label: int
+    label: int | None
     score: float
     frame_count: int
     decision: str
@@ -59,10 +59,11 @@ class VideoScoreAccumulator:
                     'Every frame probability must be finite and within [0, 1].'
                 )
 
-            numeric_label = float(label)
-            if numeric_label not in (0.0, 1.0):
-                raise ValueError('Every video label must be binary: REAL=0, FAKE=1.')
-            label = int(numeric_label)
+            if label is not None:
+                numeric_label = float(label)
+                if numeric_label not in (0.0, 1.0):
+                    raise ValueError('Every known video label must be binary: REAL=0, FAKE=1.')
+                label = int(numeric_label)
             if not isinstance(video_name, str) or not video_name:
                 raise ValueError('Every video_name must be a non-empty string.')
 

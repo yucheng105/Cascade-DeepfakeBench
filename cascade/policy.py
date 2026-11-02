@@ -19,7 +19,7 @@ def validate_policy(value: dict, dataset_id: str, *, allow_exploratory: bool = F
         raise ValueError('Unsupported policy metrics/comparators')
     if not isinstance(value.get('policy_id'),str) or not value['policy_id'].strip():
         raise ValueError('Policy must have a nonempty policy_id')
-    if dataset_id not in DATASETS.values() or value.get('dataset_id') != dataset_id:
+    if dataset_id not in (*DATASETS.values(), 'uploaded_video') or value.get('dataset_id') != dataset_id:
         raise ValueError('Policy dataset mismatch')
     if value.get('weights') != []:
         raise ValueError('Sequential policies cannot have fusion weights')

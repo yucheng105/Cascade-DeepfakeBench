@@ -17,9 +17,12 @@ def run_cascade(records: list[dict], policy: dict, adapters: dict) -> dict:
     policy=validate_policy(policy,dataset_id,allow_exploratory=True)
     identities={r['video_name']:r for r in records}
     if not records or len(identities)!=len(records) or any(
-            not isinstance(r['video_name'],str) or not r['video_name'] or r['label'] not in (0,1)
+            not isinstance(r['video_name'],str) or not r['video_name'] or r['label'] not in (0,1,None)
             for r in records):
-        raise ValueError('Runtime cohort requires unique nonempty video identities and binary labels')
+        raise ValueError('Runtime cohort requires unique identities and binary or unknown labels')
+    labeled = [r['label'] is not None for r in records]
+    if any(labeled) and not all(labeled):
+        raise ValueError('Cohort must be fully labeled or fully unknown; do not mix evaluation roles')
     final={}
     trace=[]
     summaries=[]
@@ -61,11 +64,15 @@ def run_cascade(records: list[dict], policy: dict, adapters: dict) -> dict:
     if reached or set(final)!=set(identities):
         raise ValueError('Terminal stage must decide every original video')
     videos=[final[r['video_name']][0] for r in records]
-    metrics=final_classification_metrics(videos)
-    metrics.update(tp=sum(v.label==1 and v.decision=='FAKE' for v in videos),
-                   fn=sum(v.label==1 and v.decision=='REAL' for v in videos),
-                   fp=sum(v.label==0 and v.decision=='FAKE' for v in videos),
-                   tn=sum(v.label==0 and v.decision=='REAL' for v in videos))
+    if all(labeled):
+        metrics=final_classification_metrics(videos)
+        metrics.update(tp=sum(v.label==1 and v.decision=='FAKE' for v in videos),
+                       fn=sum(v.label==1 and v.decision=='REAL' for v in videos),
+                       fp=sum(v.label==0 and v.decision=='FAKE' for v in videos),
+                       tn=sum(v.label==0 and v.decision=='REAL' for v in videos))
+    else:
+        metrics={key: None for key in ('acc','far','frr','real_count','fake_count','tp','fn','fp','tn')}
+        metrics['video_count']=len(videos)
     metrics.update(fnr=metrics['far'],fpr=metrics['frr'],
                    mean_detectors=sum(s['reached'] for s in summaries)/len(records))
     return dict(decisions=[dict(video_name=v.video_name,label=v.label,prediction=int(v.decision=='FAKE'),

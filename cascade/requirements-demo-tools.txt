@@ -1,0 +1,2 @@
+# Optional: only for encoding derivative smoke MP4s, not required by the demo runtime.
+imageio-ffmpeg==0.6.0
