@@ -66,6 +66,7 @@ class SBIDetector(AbstractDetector):
         # prepare the backbone
         backbone_class = BACKBONE[config['backbone_name']]
         model_config = config['backbone_config'].copy()
+        model_config['inference_checkpoint_only'] = config.get('inference_checkpoint_only', False)
         pretrained = config.get('pretrained')
         if pretrained and not os.path.isfile(pretrained):
             raise FileNotFoundError(f'EfficientNet-B4 weights not found: {pretrained}')

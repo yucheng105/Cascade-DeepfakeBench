@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "kind": "sequential",
+  "policy_id": "ffpp-sbi-input-profile-check-v1",
+  "dataset_id": "ffpp",
+  "deployment_ready": false,
+  "metric_definition": "fake_positive_far_is_fnr",
+  "comparators": "intermediate_real_le_fake_ge_final_fake_ge",
+  "weights": [],
+  "stages": [{"detector": "sbi", "low": 0.5, "high": 0.5}],
+  "purpose": "Functional SBI input-profile diagnostic, not policy calibration"
+}

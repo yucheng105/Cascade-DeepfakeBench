@@ -1,0 +1,9 @@
+# Install torch==2.7.1 separately from the official cu128 wheel index (see README).
+numpy==1.26.4
+opencv-python-headless==4.11.0.86
+PyYAML==6.0.2
+efficientnet-pytorch==0.7.1
+scikit-learn==1.6.1
+tensorboard==2.19.0
+Pillow==11.2.1
+tqdm==4.67.1

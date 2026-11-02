@@ -34,7 +34,10 @@ class EfficientNetB4(nn.Module):
         else:
             self.efficientnet = EfficientNet.from_name('efficientnet-b4')
         # Modify the first convolutional layer to accept input tensors with 'inc' channels
-        self.efficientnet._conv_stem = nn.Conv2d(inc, 48, kernel_size=3, stride=2, bias=False)
+        if not (efficientnetb4_config.get('inference_checkpoint_only', False) and inc == 3):
+            self.efficientnet._conv_stem = nn.Conv2d(inc, 48, kernel_size=3, stride=2, bias=False)
+        # A complete official-style RGB checkpoint needs its original SAME-padding
+        # stem as well as the weights. Legacy training keeps the replacement above.
 
         # Remove the last layer (the classifier) from the EfficientNet-B4 model
         self.efficientnet._fc = nn.Identity()

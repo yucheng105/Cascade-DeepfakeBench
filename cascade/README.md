@@ -1,5 +1,111 @@
 # Cascade pipeline
 
+## Phase 2: policy-driven offline runtime
+
+The new entry point is `python -m cascade.offline`; the existing `cascade/test.py`
+two-stage entry is retained. Phase 2 uses the original Xception, UCF and SBI model
+classes with a strict full detector checkpoint load, without requiring a separate
+ImageNet checkpoint. Training defaults are unchanged. The runtime explicitly
+opts into three-model registration using `DEEPFAKEBENCH_RUNTIME_ONLY=1`.
+
+Create an isolated Python 3.12 environment from this repository root. Install the
+official PyTorch CUDA wheel and the bounded inference dependencies:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install torch==2.7.1 --index-url https://download.pytorch.org/whl/cu128
+.\.venv\Scripts\python.exe -m pip install -r cascade/requirements-runtime.txt
+```
+
+The CUDA wheel command follows the [official PyTorch 2.7.1 installation matrix](https://pytorch.org/get-started/previous-versions/#v271).
+This runtime consumes already cropped RGB frames; dlib, torchvision, training
+augmentations and unrelated detector packages are not required. This environment
+is for the new runtime, not a claim that every legacy training entry works in it.
+
+From the repository root, run the prepared small FF++ test cohort:
+
+```powershell
+.\.venv\Scripts\python.exe -B -m cascade.offline `
+  --policy cascade/policies/ffpp_smoke_all_stages.json `
+  --dataset FaceForensics++ `
+  --dataset-json ../data/phase2_ffpp_smoke/dataset_json/FaceForensics++.json `
+  --rgb-root ../data/phase2_ffpp_smoke/rgb `
+  --device cuda --batch-size 16 --max-frames 32 --allow-exploratory `
+  --output ../DOCS/phase2_runs/my_unique_all_stages_run
+```
+
+For early-exit testing, use `cascade/policies/ffpp_smoke_early_exit.json` and a
+different output directory. These policies are functional fixtures, **not calibrated
+security policies**. Thresholds of 0/1 encourage forwarding but exact endpoint
+scores still follow normal inclusive exit rules.
+
+Policy JSON uses Phase 1 schema v1, a `policy_id` and a matching canonical
+`dataset_id` (`ffpp`, `celeb_df_v2`, `dfdc`). Only sequential policies are supported
+by this entry. Intermediate real <= low / fake >= high; final real < t / fake >= t.
+Each policy detector is unique, thresholds finite, terminal low=high. Unsupported
+metrics/comparators, wrong datasets and fusion policies are refused. Phase 1
+artifacts marked `deployment_ready=false` require `--allow-exploratory`; omitting
+that flag requires a deployment marker plus matching `checkpoint_sha256` and
+`config_sha256` dictionaries keyed by detector. Hash binding is compatibility
+validation, not proof of statistical calibration or provenance correctness.
+
+Default weights are `training/weights/{xception_best.pth,ucf_best.pth,FFc23.tar}`.
+Use repeatable `--checkpoint DETECTOR=PATH` or `--config DETECTOR=PATH` overrides
+for files actually used. Each stage hashes its source checkpoint/config before
+execution, but the model is loaded only if at least one video reaches it.
+SBI's `checkpoint['model']` / `net.*` format is mapped to DeepfakeBench names and
+strict-loaded. Other wrappers and missing/incompatible tensors fail explicitly;
+there is no silent partial weight load or random-model fallback.
+The checkpoint-only SBI path also retains EfficientNet's native SAME-padding stem;
+the legacy training constructor's unpadded replacement is not the official graph.
+An independent logits-parity test checks the restored model against
+`efficientnet_pytorch.EfficientNet` without downloading reference weights.
+
+The JSON input reader preserves `source_label + '_' + source_video_id` as opaque
+identity, rejects missing/escaping paths, and selects the first N numeric-sorted
+frames to match the current legacy exporter's effective selection. It does not
+claim uniform temporal sampling. All stages receive the same frame paths; each
+adapter separately applies its YAML resolution, RGB conversion, configured OpenCV
+resize, tensor /255 and mean/std normalization.
+The new runtime defaults SBI to `cascade/configs/sbi_unit_range.yaml` (380x380,
+linear resize, RGB /255, mean 0, std 1), following the
+[official SBI input preprocessing](https://github.com/mapooon/SelfBlendedImages/blob/master/src/inference/preprocess.py)
+and [probability inference](https://github.com/mapooon/SelfBlendedImages/blob/master/src/inference/inference_video.py).
+Xception/UCF retain their 256x256 cubic-resize and mean/std 0.5 profiles.
+The legacy `training/config/detector/sbi.yaml` ImageNet normalization remains
+available via an explicit `--config sbi=...` override for models trained for that
+normalization. This runtime's SBI graph targets the official-style checkpoint;
+normalization override alone does not certify a legacy DeepfakeBench-trained SBI
+checkpoint's architecture. Full equivalence to official face cropping and historical CSV provenance
+is not asserted. Landmarks are not used by these models'
+RGB-only inference forward; SBI synthesis/training is a different data path.
+
+Outputs (new directory only; no overwrite):
+
+- `manifest.json`: policy, hashes of checkpoints/configs/frame inputs, selected IDs,
+  preprocessing profile, source revision/dirty state and runtime file hashes,
+  device/CUDA/Python details.
+- `report.json`: complete final-cohort confusion metrics, stage reach/exit and
+  reached-cohort AUC, model load/warmup/forward/stage durations.
+- `decisions.csv`, `trace.csv`: every video's final result, exit stage and every
+  reached detector score/threshold/decision.
+- `reached_scores.csv`: video scores with full opaque IDs, frame count and
+  allocated forward milliseconds. **Later-stage coverage is only reached videos**;
+  do not treat this as a full joint-score benchmark without checking coverage.
+- `error.json` after an execution failure, if the output directory was created.
+  Failed directories are preserved; retry with a new run name.
+
+CUDA timing synchronizes before/after forward. Forward time excludes model load,
+warmup, decode and H2D; video costs allocate each batch's forward ms equally to
+frames, then sum by video. Stage time includes those operations and model release.
+No per-video end-to-end latency or streaming throughput claim is made.
+
+Tests: `python -B -m unittest discover -s cascade/tests -v`. Runtime parity tests
+expect Repo A as sibling `far-frr-graph`; production runtime has no cross-repo
+Python import. A real checkpoint/CUDA smoke run is additional to unit tests.
+
+---
+
 New sequential-cascade components live in this directory. The original
 DeepfakeBench code should only receive small compatibility changes when the
 cascade cannot be implemented cleanly as an adapter.

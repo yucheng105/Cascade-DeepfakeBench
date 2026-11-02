@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "kind": "sequential",
+  "policy_id": "ffpp-functional-all-stages-v1",
+  "dataset_id": "ffpp",
+  "deployment_ready": false,
+  "metric_definition": "fake_positive_far_is_fnr",
+  "comparators": "intermediate_real_le_fake_ge_final_fake_ge",
+  "weights": [],
+  "stages": [
+    {"detector": "xception", "low": 0.0, "high": 1.0},
+    {"detector": "ucf", "low": 0.0, "high": 1.0},
+    {"detector": "sbi", "low": 0.5, "high": 0.5}
+  ],
+  "purpose": "Functional reachability fixture, not a calibrated security policy"
+}

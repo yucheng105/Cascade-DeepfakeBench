@@ -1,6 +1,5 @@
 """Sequential cascade evaluation components."""
 
-from .data import VideoIdentityDataset
 from .video_scoring import (
     REAL,
     UNCERTAIN,
@@ -25,3 +24,11 @@ __all__ = [
     'route_final_stage',
     'route_video_scores',
 ]
+
+
+def __getattr__(name):
+    # Pure policy/routing consumers should not require the torch Dataset runtime.
+    if name == 'VideoIdentityDataset':
+        from .data import VideoIdentityDataset
+        return VideoIdentityDataset
+    raise AttributeError(name)

@@ -1,6 +1,5 @@
 """Metrics for operational cascade cohorts."""
 
-from sklearn.metrics import roc_auc_score
 
 
 def operational_auc(video_scores):
@@ -8,6 +7,7 @@ def operational_auc(video_scores):
 
     ``None`` represents N/A when the stage has no videos or only one class.
     """
+    from sklearn.metrics import roc_auc_score
     labels = [video.label for video in video_scores]
     if len(set(labels)) < 2:
         return None

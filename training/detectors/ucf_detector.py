@@ -101,6 +101,8 @@ class UCFDetector(AbstractDetector):
         backbone_class = BACKBONE[config['backbone_name']]
         model_config = config['backbone_config']
         backbone = backbone_class(model_config)
+        if config.get('inference_checkpoint_only', False):
+            return backbone
         # if donot load the pretrained weights, fail to get good results
         state_dict = torch.load(config['pretrained'])
         for name, weights in state_dict.items():

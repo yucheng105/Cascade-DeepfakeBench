@@ -1,0 +1,15 @@
+# Explicit input profile for the official-style FFc23/FFraw SBI checkpoints.
+# Separate from training/config/detector/sbi.yaml (ImageNet normalization).
+model_name: sbi
+backbone_name: efficientnetb4
+pretrained: null
+backbone_config:
+  mode: original
+  num_classes: 2
+  inc: 3
+  dropout: false
+loss_func: cross_entropy
+resolution: 380
+resize_interpolation: linear
+mean: [0.0, 0.0, 0.0]
+std: [1.0, 1.0, 1.0]

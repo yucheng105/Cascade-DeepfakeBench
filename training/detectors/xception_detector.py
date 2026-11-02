@@ -1,4 +1,4 @@
-'''
+r'''
 # author: Zhiyuan Yan
 # email: zhiyuanyan@link.cuhk.edu.cn
 # date: 2023-0706
@@ -65,6 +65,9 @@ class XceptionDetector(AbstractDetector):
         backbone_class = BACKBONE[config['backbone_name']]      # 找到 Xception Backbone class
         model_config = config['backbone_config']                # 找出設定
         backbone = backbone_class(model_config)                 # 建立 neural network object
+        if config.get('inference_checkpoint_only', False):
+            # The dedicated runtime immediately strict-loads a complete detector checkpoint.
+            return backbone
         # if donot load the pretrained weights, fail to get good results
         state_dict = torch.load(config['pretrained'])
         for name, weights in state_dict.items():
