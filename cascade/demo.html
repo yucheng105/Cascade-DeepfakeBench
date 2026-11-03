@@ -13,12 +13,12 @@ main{max-width:1160px;margin:auto;padding:40px 28px 70px}header{display:flex;ali
 <header><div class="brand">CASCA<span>de</span><div class="eyebrow">Offline video detection</div></div><span class="badge" id="device">本機 Demo · 載入設定中</span></header>
 <div class="intro"><div class="eyebrow">Phase 2 · Video Entry</div><h1>從一支影片，看見每一步判定。</h1><p class="muted">上傳 MP4，經人臉偵測與對齊後，依雙門檻政策執行 Xception → UCF → SBI。</p></div>
 <div class="layout"><aside>
-<section class="panel"><h2>01　選擇離線影片</h2><div class="drop"><strong>MP4 影片</strong><input id="file" type="file" accept="video/mp4,.mp4" aria-label="選擇 MP4 影片"><p class="muted" id="limits" style="font-size:12px">最多 200 MiB、120 秒、1920×1080 像素</p></div>
+<section class="panel"><h2>01　選擇離線影片</h2><div class="drop"><strong>MP4 影片</strong><input id="file" type="file" accept="video/mp4,.mp4" aria-label="選擇 MP4 影片"><p class="muted" id="limits" style="font-size:12px">最多 200 MiB、1200 秒（20 分鐘）、1920×1080 像素、32 幀</p></div>
 <label for="policy">展示政策</label><select id="policy"><option value="early">Early Exit · 雙門檻 .2 / .8</option><option value="all_stages">全階段展示 · 前兩關 0 / 1</option></select>
 <p class="note">全階段政策鼓勵樣本續傳；分數恰為 0 或 1 時仍依門檻規則退場。</p>
 <label class="check"><input id="consent" type="checkbox"><span>我了解這是探索性功能展示，尚未完成正式模型效能驗收。</span></label>
 <button id="submit">開始分析影片 →</button><div id="status" class="status" role="status" aria-live="polite">選擇影片並確認探索模式後即可開始。</div><div class="progress" aria-hidden="true"><i id="bar"></i></div>
-<footer>全片最多均勻抽取 32 幀；影片越長取樣越稀疏，可能漏掉短暫換臉。長影片解碼時間會增加。每個抽樣影格僅分析最大人臉，不做人員追蹤。一次處理一支影片；原檔與歷史結果不覆寫。</footer></section>
+<footer>全片最多均勻抽取 32 幀；影片越長取樣越稀疏，可能漏掉短暫換臉。長影片解碼時間會增加；解碼與人臉處理超過 180 秒會停止並顯示失敗。每個抽樣影格僅分析最大人臉，不做人員追蹤。一次處理一支影片；原檔與歷史結果不覆寫。</footer></section>
 <section class="panel"><h2>最近的展示</h2><div id="history" class="muted">尚無紀錄</div></section>
 </aside><article>
 <section class="panel"><h2>02　影片與處理狀態</h2><div id="filename" class="file-name">尚未選擇影片</div><video id="player" controls playsinline hidden></video><div id="empty" class="empty"><div style="font-size:35px">▷</div><p>選擇影片，開始一次可追溯的分析</p><div class="steps"><span>MP4</span>→<span>人臉對齊</span>→<span>Cascade</span>→<span>影片級判定</span></div><p class="muted" style="font-size:12px">會保留完整結果與逐關決策，不需要 Ground Truth。</p></div></section>

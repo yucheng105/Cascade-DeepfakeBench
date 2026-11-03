@@ -66,6 +66,10 @@ class DemoHTTPTests(unittest.TestCase):
         code, page = self.request('GET', '/')
         self.assertEqual(code, 200)
         self.assertIn('短暫換臉', page.decode('utf-8'))
+        initial_limits = page.decode('utf-8').split('id="limits"', 1)[1].split('</p>', 1)[0]
+        self.assertIn('1200 秒（20 分鐘）', initial_limits)
+        self.assertNotIn('120 秒', initial_limits)
+        self.assertIn('超過 180 秒', page.decode('utf-8'))
 
     def settled(self, job_id):
         for _ in range(100):
