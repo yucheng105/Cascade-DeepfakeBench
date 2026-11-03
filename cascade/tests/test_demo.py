@@ -56,6 +56,17 @@ class DemoHTTPTests(unittest.TestCase):
     def upload(self, body=b'valid movie', filename='同名.mp4'):
         return self.request('POST', '/api/jobs?'+urlencode(dict(filename=filename, policy='early', exploratory='true')), body)
 
+    def test_config_explains_twenty_minute_limit_and_sparse_sampling(self):
+        code, body = self.request('GET', '/api/config')
+        self.assertEqual(code, 200)
+        config = json.loads(body)
+        self.assertEqual(config['max_bytes'], 200 * 1024 * 1024)
+        self.assertIn('1200 秒', config['limits'])
+        self.assertIn('32 幀', config['limits'])
+        code, page = self.request('GET', '/')
+        self.assertEqual(code, 200)
+        self.assertIn('短暫換臉', page.decode('utf-8'))
+
     def settled(self, job_id):
         for _ in range(100):
             code, content = self.request('GET', '/api/jobs/'+job_id)

@@ -24,7 +24,7 @@ Single-video CLI uses the same pipeline:
 
 Use `--policy cascade/policies/uploaded_video_all_stages.json` to demonstrate
 three-stage reachability. Exact endpoint scores still follow normal routing.
-Outputs require a new directory. Default: max 200 MiB, 120 seconds, 2073600
+Outputs require a new directory. Default: max 200 MiB, 1200 seconds (20 minutes), 2073600
 pixels/frame (1920×1080 total), 240 fps and 32 unique uniformly sampled frames.
 Decode metadata must agree with actual decoded frames. Crop failures are counted;
 no valid faces, invalid/truncated input or model failures produce an explicit
@@ -231,3 +231,5 @@ FRR cover the original full FaceForensics++ test cohort, with fake as class 1:
 FAR = fake videos classified as REAL / all fake videos
 FRR = real videos classified as FAKE / all real videos
 ```
+
+Long videos: at most 32 frames are sampled uniformly over the entire video; brief manipulations can be missed. Decode time increases with video length; the existing 180-second decode/face-processing timeout and 200 MiB size limit still apply. This is not segmented detection.

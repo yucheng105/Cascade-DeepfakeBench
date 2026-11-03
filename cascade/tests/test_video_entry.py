@@ -27,6 +27,30 @@ class FixtureFaces:
 
 
 class VideoInputTests(unittest.TestCase):
+    def test_twenty_minute_boundary_and_uniform_sampling(self):
+        from cascade.video_input import prepare_video, VideoLimits
+        class Capture:
+            def __init__(self, count): self.count, self.index = count, 0
+            def isOpened(self): return True
+            def get(self, field):
+                return {cv2.CAP_PROP_FPS: 1, cv2.CAP_PROP_FRAME_COUNT: self.count,
+                        cv2.CAP_PROP_FRAME_WIDTH: 64, cv2.CAP_PROP_FRAME_HEIGHT: 64}[field]
+            def read(self):
+                self.index += 1
+                return (True, np.zeros((64, 64, 3), dtype=np.uint8)) if self.index <= self.count else (False, None)
+            def release(self): pass
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp); source = root/'source.mp4'; source.write_bytes(b'fixture')
+            with patch('cascade.video_input.cv2.VideoCapture', return_value=Capture(1200)):
+                frames, info = prepare_video(source, root, VideoLimits(), FixtureFaces())
+            self.assertEqual(len(frames), 32)
+            self.assertEqual(info['decoded_frame_count'], 1200)
+            self.assertEqual(info['duration_seconds'], 1200)
+            self.assertEqual([info['samples'][i]['frame_index'] for i in (0, -1)], [0, 1199])
+            with patch('cascade.video_input.cv2.VideoCapture', return_value=Capture(1201)):
+                with self.assertRaisesRegex(ValueError, '1200'):
+                    prepare_video(source, root, VideoLimits(), FixtureFaces())
+
     def test_truncated_decode_is_not_silently_classified(self):
         from cascade.video_input import prepare_video, VideoLimits
         with tempfile.TemporaryDirectory() as temp:

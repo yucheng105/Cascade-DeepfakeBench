@@ -18,7 +18,7 @@ main{max-width:1160px;margin:auto;padding:40px 28px 70px}header{display:flex;ali
 <p class="note">全階段政策鼓勵樣本續傳；分數恰為 0 或 1 時仍依門檻規則退場。</p>
 <label class="check"><input id="consent" type="checkbox"><span>我了解這是探索性功能展示，尚未完成正式模型效能驗收。</span></label>
 <button id="submit">開始分析影片 →</button><div id="status" class="status" role="status" aria-live="polite">選擇影片並確認探索模式後即可開始。</div><div class="progress" aria-hidden="true"><i id="bar"></i></div>
-<footer>每個抽樣影格僅分析最大人臉，不做人員追蹤。一次處理一支影片；原檔與歷史結果不覆寫。</footer></section>
+<footer>全片最多均勻抽取 32 幀；影片越長取樣越稀疏，可能漏掉短暫換臉。長影片解碼時間會增加。每個抽樣影格僅分析最大人臉，不做人員追蹤。一次處理一支影片；原檔與歷史結果不覆寫。</footer></section>
 <section class="panel"><h2>最近的展示</h2><div id="history" class="muted">尚無紀錄</div></section>
 </aside><article>
 <section class="panel"><h2>02　影片與處理狀態</h2><div id="filename" class="file-name">尚未選擇影片</div><video id="player" controls playsinline hidden></video><div id="empty" class="empty"><div style="font-size:35px">▷</div><p>選擇影片，開始一次可追溯的分析</p><div class="steps"><span>MP4</span>→<span>人臉對齊</span>→<span>Cascade</span>→<span>影片級判定</span></div><p class="muted" style="font-size:12px">會保留完整結果與逐關決策，不需要 Ground Truth。</p></div></section>

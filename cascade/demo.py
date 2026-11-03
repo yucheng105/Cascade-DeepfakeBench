@@ -173,7 +173,7 @@ def make_server(root: Path, *, port=8765, device='cuda', face_model: Path = MODE
                 self.end_headers()
             elif path == '/api/config':
                 self.send_json(dict(device=state.device, max_bytes=VideoLimits().max_bytes,
-                                    limits='MP4 · ≤200 MiB · ≤120 秒 · ≤1920×1080 像素 · 最多 32 幀'))
+                                    limits=f'MP4 · ≤200 MiB · ≤{VideoLimits().max_seconds} 秒（{VideoLimits().max_seconds // 60} 分鐘） · ≤1920×1080 像素 · 最多 32 幀'))
             elif path == '/api/jobs':
                 with state.lock:
                     self.send_json([dict(id=j['id'], filename=j['filename'], phase=j['phase'])

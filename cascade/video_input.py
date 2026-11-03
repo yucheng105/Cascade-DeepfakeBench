@@ -17,7 +17,7 @@ FACE_PROFILE = 'yunet2023mar_largest_face_similarity256_margin1.3_v1'
 @dataclass(frozen=True)
 class VideoLimits:
     max_bytes: int = 200 * 1024 * 1024
-    max_seconds: int = 120
+    max_seconds: int = 1200
     max_pixels: int = 1920 * 1080
     max_frames: int = 32
     max_fps: int = 240
@@ -101,7 +101,7 @@ def prepare_video(path: Path, output: Path, limits: VideoLimits, faces, progress
             raise ValueError('影片 FPS／影格數無效或超限')
         count = int(count_value)
         if width <= 0 or height <= 0 or width*height > limits.max_pixels or count/fps > limits.max_seconds:
-            raise ValueError('影片需在 120 秒及 1920×1080 像素範圍內')
+            raise ValueError(f'影片需在 {limits.max_seconds} 秒及每幀 {limits.max_pixels} 像素範圍內')
         selected = set(np.linspace(0, count-1, min(count, limits.max_frames), dtype=int).tolist())
         frame_dir = output / 'frames'
         frame_dir.mkdir(exist_ok=False)
