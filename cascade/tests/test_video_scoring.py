@@ -73,6 +73,23 @@ class OperationalAucTest(unittest.TestCase):
 
 
 class FinalStageTest(unittest.TestCase):
+    def test_explicit_rates_use_asymmetric_class_denominators(self):
+        labels = [0, 0, 0, 1, 1, 1, 1]
+        scores = [0.9, 0.1, 0.1, 0.1, 0.1, 0.9, 0.9]
+        videos = route_final_stage(tuple(VideoScore(str(i), y, s, 1)
+            for i, (y, s) in enumerate(zip(labels, scores))), 0.5)
+        metrics = final_classification_metrics(videos)
+        self.assertEqual(metrics['fnr'], 2 / 4)
+        self.assertEqual(metrics['fpr'], 1 / 3)
+        self.assertEqual(metrics['far'], metrics['fnr'])
+        self.assertEqual(metrics['frr'], metrics['fpr'])
+
+    def test_absent_class_has_null_explicit_rate(self):
+        videos = route_final_stage((VideoScore('real', 0, 0.1, 1),), 0.5)
+        metrics = final_classification_metrics(videos)
+        self.assertIsNone(metrics['fnr'])
+        self.assertEqual(metrics['fpr'], 0.)
+
     def test_final_threshold_is_fake_inclusive(self):
         scores = (
             VideoScore('below', 0, 0.49, 2),

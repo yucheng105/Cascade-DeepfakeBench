@@ -34,6 +34,20 @@ class FakeAdapter:
 
 
 class RuntimeTests(unittest.TestCase):
+    def test_report_exposes_explicit_rates_and_definition(self):
+        labels = [0, 0, 0, 1, 1, 1, 1]
+        scores = [.9, .1, .1, .1, .1, .9, .9]
+        records = [dict(video_name=str(i), label=y) for i, y in enumerate(labels)]
+        adapter = FakeAdapter('xception', {str(i): s for i, s in enumerate(scores)})
+        p = policy()
+        p['stages'] = [dict(detector='xception', low=.5, high=.5)]
+        result = run_cascade(records, p, {'xception': adapter})
+        self.assertEqual(result['metric_definition'], 'fake_positive_far_is_fnr')
+        self.assertEqual(result['metrics']['fnr'], .5)
+        self.assertEqual(result['metrics']['fpr'], 1/3)
+        self.assertEqual(result['metrics']['far'], result['metrics']['fnr'])
+        self.assertEqual(result['metrics']['frr'], result['metrics']['fpr'])
+
     def setUp(self):
         self.records=[dict(video_name=i,label=y) for i,y in [('a',0),('b',1),('c',0),('d',1)]]
         self.adapters=dict(xception=FakeAdapter('xception',dict(a=.2,b=.8,c=.5,d=.5)),

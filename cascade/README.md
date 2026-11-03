@@ -228,8 +228,15 @@ Stage 2 AUC covers only videos actually processed by UCF. Final ACC, FAR, and
 FRR cover the original full FaceForensics++ test cohort, with fake as class 1:
 
 ```text
-FAR = fake videos classified as REAL / all fake videos
-FRR = real videos classified as FAKE / all real videos
+FNR = FAR = fake videos classified as REAL / all fake videos
+FPR = FRR = real videos classified as FAKE / all real videos
 ```
+
+FNR/FPR are the explicit error-rate names. FAR/FRR are compatibility aliases
+using "accept = classify as REAL". They do not change score semantics: Fake=1,
+Real=0, high fake score predicts FAKE. A missing class has a null rate; an
+unlabeled upload has null evaluation metrics. See the sibling
+`far-frr-graph/METRIC_DEFINITIONS.md` for historical fusion exports whose aliases
+were reversed and a non-destructive prediction audit.
 
 Long videos: at most 32 frames are sampled uniformly over the entire video; brief manipulations can be missed. Decode time increases with video length; the existing 180-second decode/face-processing timeout and 200 MiB size limit still apply. This is not segmented detection.

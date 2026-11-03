@@ -16,7 +16,7 @@ def operational_auc(video_scores):
 
 
 def final_classification_metrics(final_videos):
-    """Compute video-level ACC, FAR, and FRR over the original full cohort.
+    """Compute video-level ACC, FNR/FPR and legacy FAR/FRR aliases.
 
     Fake is the positive class. FAR is fake classified as REAL, while FRR is
     real classified as FAKE. A missing class produces ``None`` for its rate.
@@ -46,10 +46,14 @@ def final_classification_metrics(final_videos):
             real_count += 1
             false_rejects += int(predicted_label == 1)
 
+    fnr = None if fake_count == 0 else false_accepts / fake_count
+    fpr = None if real_count == 0 else false_rejects / real_count
     return {
         'acc': correct / len(final_videos),
-        'far': None if fake_count == 0 else false_accepts / fake_count,
-        'frr': None if real_count == 0 else false_rejects / real_count,
+        'fnr': fnr,
+        'fpr': fpr,
+        'far': fnr,
+        'frr': fpr,
         'video_count': len(final_videos),
         'real_count': real_count,
         'fake_count': fake_count,

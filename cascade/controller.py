@@ -71,12 +71,12 @@ def run_cascade(records: list[dict], policy: dict, adapters: dict) -> dict:
                        fp=sum(v.label==0 and v.decision=='FAKE' for v in videos),
                        tn=sum(v.label==0 and v.decision=='REAL' for v in videos))
     else:
-        metrics={key: None for key in ('acc','far','frr','real_count','fake_count','tp','fn','fp','tn')}
+        metrics={key: None for key in ('acc','fnr','fpr','far','frr','real_count','fake_count','tp','fn','fp','tn')}
         metrics['video_count']=len(videos)
-    metrics.update(fnr=metrics['far'],fpr=metrics['frr'],
-                   mean_detectors=sum(s['reached'] for s in summaries)/len(records))
+    metrics.update(mean_detectors=sum(s['reached'] for s in summaries)/len(records))
     return dict(decisions=[dict(video_name=v.video_name,label=v.label,prediction=int(v.decision=='FAKE'),
                                 decision=v.decision,exit_stage=final[v.video_name][1],score=v.score,
                                 frame_count=v.frame_count) for v in videos],
                 trace=trace,stages=summaries,metrics=metrics,
+                metric_definition='fake_positive_far_is_fnr',
                 controller_seconds=time.perf_counter()-started)

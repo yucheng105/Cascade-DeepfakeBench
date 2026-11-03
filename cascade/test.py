@@ -210,8 +210,8 @@ def print_final_summary(final_metrics):
     print('ground_truth_REAL: {}'.format(final_metrics['real_count']))
     print('ground_truth_FAKE: {}'.format(final_metrics['fake_count']))
     print('ACC: {}'.format(format_optional_metric(final_metrics['acc'])))
-    print('FAR: {}'.format(format_optional_metric(final_metrics['far'])))
-    print('FRR: {}'.format(format_optional_metric(final_metrics['frr'])))
+    print('FNR (FAR, fake accepted as real): {}'.format(format_optional_metric(final_metrics['fnr'])))
+    print('FPR (FRR, real rejected as fake): {}'.format(format_optional_metric(final_metrics['fpr'])))
 
 
 def main():

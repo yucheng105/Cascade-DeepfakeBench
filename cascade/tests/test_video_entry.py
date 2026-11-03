@@ -200,7 +200,7 @@ class UnknownLabelTests(unittest.TestCase):
         result = run_cascade([dict(video_name='uploaded', label=None)], policy, {'xception': Adapter()})
         self.assertEqual(result['decisions'][0]['decision'], 'FAKE')
         self.assertIsNone(result['decisions'][0]['label'])
-        for key in ('acc', 'far', 'frr', 'tp', 'fn', 'fp', 'tn'):
+        for key in ('acc', 'fnr', 'fpr', 'far', 'frr', 'tp', 'fn', 'fp', 'tn'):
             self.assertIsNone(result['metrics'][key])
 
 
