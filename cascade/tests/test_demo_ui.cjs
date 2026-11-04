@@ -18,11 +18,11 @@ class Element {
   pause(){}
   play(){return Promise.resolve();}
 }
-function page(){
+function page(config=null){
   const elements=new Map([...html.matchAll(/<[^>]+\bid="([^"]+)"[^>]*>/g)].map(m=>{const el=new Element();el.hidden=/\bhidden\b/.test(m[0]);return [m[1],el];}));
   elements.get('analysis-mode').value='offline';
   const document={createElement:()=>new Element(),getElementById:id=>{assert.ok(elements.has(id),'Missing DOM ID: '+id);return elements.get(id);}};
-  const ctx=vm.createContext({document,fetch:()=>new Promise(()=>{}),setTimeout:()=>1,clearTimeout:()=>{},URL,URLSearchParams,console});
+  const ctx=vm.createContext({document,fetch:url=>url==='/api/config'&&config?Promise.resolve({json:async()=>config}):new Promise(()=>{}),setTimeout:()=>1,clearTimeout:()=>{},URL,URLSearchParams,console});
   vm.runInContext(html.split('<script>')[1].split('</script>')[0],ctx);
   return {ctx,el:id=>elements.get(id),run:code=>vm.runInContext(code,ctx)};
 }
@@ -115,4 +115,18 @@ test('Offline Window selects window policies and shows stored evidence scope',()
   assert.match(p.el('aggregate-summary').textContent,/聯集 4 s/);
   delete p.ctx.job.report.aggregate;p.run('showStream(job)');
   assert.match(p.el('aggregate-summary').textContent,/未提供/);
+});
+
+
+test('API v2 never shows Phase 3 ready; startup and submit share the capability gate',async()=>{
+  const old=page({api_version:2,analysis_modes:['offline','stream'],device:'cuda',limits:'fixture'});
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.doesNotMatch(old.el('device').textContent,/已就緒/);
+  assert.match(old.el('device').textContent,/API v2/);
+  assert.equal(old.run("supportsWindowMode({api_version:2,analysis_modes:['stream']},'stream')"),false);
+  const current=page({api_version:3,analysis_modes:['offline','stream','offline_window'],device:'cuda',limits:'fixture'});
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.match(current.el('device').textContent,/Phase 3 後端已就緒/);
+  assert.equal(current.run("supportsWindowMode({api_version:3,analysis_modes:['offline_window']},'offline_window')"),true);
+  assert.equal(current.run("supportsWindowMode({api_version:3,analysis_modes:['stream']},'offline_window')"),false);
 });
