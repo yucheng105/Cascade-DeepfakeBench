@@ -21,9 +21,12 @@ ASSET_LOCK=REPO_ROOT/'cascade/assets/preprocessing/assets.json'
 PROFILE_FOR_MODEL={'xception':'dlib81','ucf':'dlib81','sbi':'retinaface'}
 
 
-def atomic_json(path,value,*,indent=2):
+def atomic_json(path,value,*,indent=2,max_bytes=None):
+    content=json.dumps(value,ensure_ascii=False,indent=indent,allow_nan=False)+'\n'
+    if max_bytes is not None and len(content.encode('utf-8'))>max_bytes:
+        raise MetadataBudgetExceeded('Session metadata budget exceeded')
     temporary=path.with_suffix('.tmp')
-    temporary.write_text(json.dumps(value,ensure_ascii=False,indent=indent,allow_nan=False)+'\n',encoding='utf-8')
+    temporary.write_text(content,encoding='utf-8')
     # Windows scanners/readers can briefly hold a handle without FILE_SHARE_DELETE.
     for attempt in range(20):
         try:
@@ -32,6 +35,10 @@ def atomic_json(path,value,*,indent=2):
         except PermissionError:
             if attempt==19:raise
             time.sleep(.05)
+
+
+class MetadataBudgetExceeded(ValueError):
+    """A rejected snapshot leaves the previous atomic report available."""
 
 
 def load_assets(lock=ASSET_LOCK):

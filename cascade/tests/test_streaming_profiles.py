@@ -53,6 +53,9 @@ class StreamingProfileTests(unittest.TestCase):
                 self.assertEqual(result['profiles']['retinaface']['valid_face_frames'],2)
                 self.assertEqual(calls,dict(dlib81=2,retinaface=2))
                 self.assertEqual(load.call_count,3)
+                self.assertTrue(all(s['timing']['tensor_seconds']>=0 for s in result['stages']))
+                self.assertIn('scope',result['worker_rss'])
+                self.assertIsNone(result['gpu_peak_reserved_bytes'])
                 no_sbi = True
                 missing = engine.infer(dict(window,index=1))
                 self.assertEqual(missing['outcome'],'unable_to_decide')

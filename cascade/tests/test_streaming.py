@@ -195,6 +195,17 @@ class StreamingHTTPTests(unittest.TestCase):
         self.assertIn('cache budget',state['message'])
         self.assertTrue(all(r['decision'] is None for r in state['report']['windows']))
 
+    def test_legacy_window_count_budget_is_enforced_before_inference(self):
+        def limited(video,output,**kwargs):
+            return StreamingSession(video,output,source_factory=Source,
+                worker_factory=self.worker_type,window_seconds=.1,sample_hz=20,max_windows=1,**kwargs)
+        self.server.demo_state.stream_factory=limited
+        state=self.settled(self.start())
+        self.assertEqual(state['phase'],'failed')
+        self.assertIn('record budget',state['message'])
+        self.assertEqual(state['report']['windows'],[])
+        self.assertEqual(self.worker_type.calls,[])
+
     def test_persistence_failure_stops_consumer_without_false_completion(self):
         from cascade.streaming import save_report
         raised = False
@@ -258,6 +269,10 @@ class NativeSourceTests(unittest.TestCase):
                 self.assertAlmostEqual(source.info['duration_seconds'], .5)
                 self.assertLess(source.read(0).mean(), source.read(3).mean())
                 source.finish()
+                self.assertEqual(source.measurements['decoded_frames'],5)
+                self.assertGreaterEqual(source.measurements['seconds_total'],0.)
+                self.assertEqual(source.measurements['ipc_image_bytes'],2*32*32*3)
+                self.assertIn('scope',source.measurements['rss'])
             finally:
                 source.close()
             video.write_bytes(b'corrupt')

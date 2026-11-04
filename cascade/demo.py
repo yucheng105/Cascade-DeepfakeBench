@@ -58,6 +58,9 @@ class DemoState:
         self.lock = threading.Lock()
         self.active: str | None = None
         self.jobs: dict[str, dict] = {}
+        # One stripped streaming report cache, shared across jobs. Full histories
+        # remain on disk rather than retained in every job dictionary.
+        self.report_cache = None
         for path in sorted(self.root.glob('*/job.json'), key=lambda p:p.stat().st_mtime):
             if not re.fullmatch('[0-9a-f]{32}', path.parent.name):
                 continue
@@ -84,7 +87,7 @@ class DemoState:
                         from .preprocessing import atomic_json
                         save_report(result, report)
                         atomic_json(result/'status.json', dict(phase='failed', message=report['message']))
-                    job.update(phase=phase, message=report.get('message','串流紀錄'), report=report)
+                    job.update(phase=phase, message=report.get('message','串流紀錄'))
                 elif (result/'report.json').is_file() and \
                         json.loads((result/'status.json').read_text(encoding='utf-8'))['phase'] == 'complete':
                     job.update(phase='complete', message='推論完成',
@@ -131,12 +134,17 @@ class DemoState:
         with self.lock:
             job=dict(self.jobs[job_id])
             if job.get('analysis_mode') in ('stream','offline_window') and (self.root/job_id/'result/report.json').is_file():
-                report = read_json(self.root/job_id/'result/report.json')
-                # Polling needs counts and traces; full per-frame geometry stays
-                # in the downloadable report, avoiding quadratic UI traffic.
-                report['windows'] = [dict(row, profiles={name:{k:v for k,v in profile.items() if k!='samples'}
-                    for name,profile in row.get('profiles',{}).items()}) for row in report['windows']]
-                job['report'] = report
+                path=self.root/job_id/'result/report.json'
+                stat=path.stat()
+                key=(job_id,stat.st_ino,stat.st_mtime_ns,stat.st_size)
+                if self.report_cache is None or self.report_cache[0]!=key:
+                    report=read_json(path)
+                    # Full geometry remains in downloads. Atomic replacement
+                    # changes the cache key; a racing read is retried next poll.
+                    report['windows'] = [dict(row, profiles={name:{k:v for k,v in profile.items() if k!='samples'}
+                        for name,profile in row.get('profiles',{}).items()}) for row in report['windows']]
+                    self.report_cache=(key,report)
+                job['report'] = self.report_cache[1]
             job['diagnostic_files']=[name for name in ('error.json','manifest.json','preprocessing.json','partial_trace.json')
                 if (self.root/job_id/'result'/name).is_file()]
             return job
@@ -157,7 +165,7 @@ class DemoState:
                         self.sessions[job_id] = session
                     result = session.run()
                     with self.lock:
-                        self.jobs[job_id].update(report=result, phase=result['phase'], message=result['message'])
+                        self.jobs[job_id].update(phase=result['phase'], message=result['message'])
                         self.active = None
                     return
                 result = self.runner(self.root/job_id/'input.mp4', self.root/job_id/'result',

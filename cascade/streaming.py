@@ -26,6 +26,7 @@ from .model_loader import sha256
 from .preprocessing import atomic_json
 from .video_input import VideoLimits
 from .download_face_model import MODEL_PATH
+from .performance import counter, observe, summarize, window_timing, rss
 
 
 class StreamStopped(Exception):
@@ -61,6 +62,7 @@ def reuse_retina_priors(model):
 
 
 def save_report(output, report):
+    summarize(report)
     rows = report['windows']
     decided = [r for r in rows if r['outcome']=='decided']
     delays = sorted(r['latency_seconds'] for r in decided if 'latency_seconds' in r)
@@ -71,8 +73,13 @@ def save_report(output, report):
         failed=sum(r['outcome']=='failed' for r in rows),
         p95_latency_seconds=delays[math.ceil(.95*len(delays))-1] if delays else None,
         p50_latency_seconds=delays[math.ceil(.50*len(delays))-1] if delays else None,
+        max_latency_seconds=delays[-1] if delays else None,
+        latency_sample_count=len(delays),
         percentile_method='nearest_rank; decided windows only; all dispositions disclosed')
-    atomic_json(output/'report.json', report, indent=None)
+    budget=report.get('resource_budget',{}).get('report_metadata_bytes')
+    if budget is not None and report.get('phase')=='failed':
+        budget += report['resource_budget']['failure_report_reserve_bytes']
+    atomic_json(output/'report.json', report, indent=None,max_bytes=budget)
     temporary = output/'windows.tmp'
     columns = ['index','start_seconds','end_seconds','outcome','decision','score','exit_stage',
                'planned_samples','latency_seconds','reason']
@@ -105,7 +112,7 @@ def _decoder(connection, video):
                 width <= 0 or height <= 0 or width*height > limits.max_pixels:
             raise ValueError('Invalid or unsupported MP4 metadata')
         connection.send(('ok', dict(fps=fps, frame_count=int(count), width=width, height=height,
-                                    duration_seconds=count/fps)))
+                                    duration_seconds=count/fps,decoder_rss=rss())))
         decoded = 0
         while True:
             command, value = connection.recv()
@@ -113,6 +120,8 @@ def _decoder(connection, video):
                 return
             target = int(count)-1 if command == 'finish' else value
             image = None
+            decode_began=time.perf_counter()
+            before=decoded
             while decoded <= target:
                 ok, image = cap.read()
                 if not ok:
@@ -124,11 +133,12 @@ def _decoder(connection, video):
                 ok, _ = cap.read()
                 if ok:
                     raise ValueError('MP4 contains more frames than declared')
-                connection.send(('ok', None))
+                image=None
             else:
                 if image is None:
                     raise ValueError('Non-monotonic source frame request')
-                connection.send(('ok', image))
+            connection.send(('ok',dict(image=image,decode_seconds=time.perf_counter()-decode_began,
+                decoded_frames=decoded-before,decoder_rss=rss())))
     finally:
         cap.release()
 
@@ -344,7 +354,12 @@ class OfficialWindowEngine:
         outcome.update(profiles=profile_results, planned_samples=len(window['samples']), label=None,
                        processing_seconds=time.perf_counter()-began, active_cache_peak_bytes=used,
                        gpu_peak_allocated_bytes=torch.cuda.max_memory_allocated(self.device)
-                           if str(self.device).startswith('cuda') else None)
+                           if str(self.device).startswith('cuda') else None,
+                       gpu_peak_reserved_bytes=torch.cuda.max_memory_reserved(self.device)
+                           if str(self.device).startswith('cuda') else None,
+                       worker_rss=rss())
+        outcome['prepared_cache_bytes']=self.prepared_bytes
+        outcome['prepared_cache_entries']=len(self.prepared_cache)
         return outcome
 
     def close(self):
@@ -439,10 +454,19 @@ class VideoSource:
     def __init__(self, video, *, stop_event, **kwargs):
         self.peer = Peer('decode', (str(video),), VideoLimits().decode_timeout_seconds, stop_event)
         self.info = self.peer.initial
+        self.measurements=dict(counter(),decoded_frames=0,ipc_image_bytes=0,
+                               scope='child local decode/validation; excludes IPC; not additive with parent read')
+    def _call(self,command,value=None):
+        result=self.peer.call(command,value)
+        observe(self.measurements,result['decode_seconds'])
+        self.measurements['decoded_frames']+=result['decoded_frames']
+        self.measurements['rss']=result['decoder_rss']
+        if result['image'] is not None:self.measurements['ipc_image_bytes']+=result['image'].nbytes
+        return result['image']
     def read(self, index):
-        return self.peer.call('read', index)
+        return self._call('read', index)
     def finish(self):
-        return self.peer.call('finish')
+        return self._call('finish')
     def close(self):
         self.peer.close()
 
@@ -469,10 +493,13 @@ class StreamingSession:
                  progress=None, source_factory=VideoSource, worker_factory=ModelWorker,
                  window_seconds=4., sample_hz=2., original_filename=None, policy=None,policy_path=None,
                  configs=None,checkpoints=None, analysis_mode="stream",stride_seconds=None,
-                 event_source_factory=None, max_windows=10000,max_session_seconds=3600.,max_events=200000, **kwargs):
+                 event_source_factory=None, max_windows=10000,max_session_seconds=3600.,max_events=200000,
+                 max_report_bytes=64*1024*1024, max_window_metadata_bytes=512*1024, **kwargs):
         if not math.isfinite(profile_timeout) or profile_timeout <= 0 or cache_max_bytes < 1 or \
                 not math.isfinite(window_seconds) or window_seconds <= 0 or not math.isfinite(sample_hz) or sample_hz <= 0:
             raise ValueError('Invalid streaming budget or cadence')
+        if any(type(v) is not int or v<1 for v in (max_report_bytes,max_window_metadata_bytes)) or max_window_metadata_bytes>512*1024:
+            raise ValueError('Invalid metadata budget')
         from .windowing import WindowTimeline
         from .temporal import TemporalAggregator
         if analysis_mode not in ('stream','offline_window'):
@@ -485,6 +512,9 @@ class StreamingSession:
         WindowTimeline('validation','validation',window_seconds=window_seconds,stride_seconds=self.stride_seconds,
                        sample_hz=sample_hz,cache_max_bytes=cache_max_bytes,**self.timeline_limits)
         self.aggregate=TemporalAggregator()
+        self.aggregate_ids: set[str] = set()
+        self.max_window_metadata_bytes=max_window_metadata_bytes
+        self.last_progress_save=0.
         self.video, self.output = video, output
         from .policy import frozen_policy, execution_contract, validate_runtime_input
         selected, policy_hash = frozen_policy(policy,path=policy_path)
@@ -518,9 +548,26 @@ class StreamingSession:
             sampling=actual['sampling'], preprocessing_mode=preprocessing_mode,
             metrics={k:None for k in ('acc','fnr','fpr','tp','fn','fp','tn')},
             resource_budget=dict(active_cache_bytes=cache_max_bytes, native_call_timeout_seconds=profile_timeout,
+                report_metadata_bytes=max_report_bytes,window_metadata_bytes=max_window_metadata_bytes,
+                failure_report_reserve_bytes=4*1024*1024,
+                max_windows=max_windows,max_session_seconds=max_session_seconds,max_events=max_events,
+                retention='complete metadata retained within record/event/time/report budgets; no automatic deletion',
                 persisted_artifacts='metadata_only; source upload retained; raw/crop scratch reclaimed per window'),
             warnings=['模擬即時串流；探索性、未校準。Fake score 不是判斷正確的機率。',
                       'Xception/UCF 最大臉；官方 SBI 合格多臉幀內 max，再跨有效幀 mean；無人物追蹤。'])
+        self.report['performance'] = dict(schema_version=1, slo_verdict='NOT_EVALUATED',
+            percentile_method='nearest_rank; decided windows; grouped by latency_scope; startup excluded',
+            source_read=dict(counter(),scope='parent read roundtrip incl IPC/reader scheduling; not pure native decode'),
+            admission=dict(counter(),scope='timeline validation/selection; excludes media pacing'),
+            persistence=dict(counter(),bytes_written_total=0,
+                scope='completed report/CSV writes before this snapshot; excludes current write and fsync guarantee'),
+            ipc_raw_payload_bytes_total=0,ipc_scope='sum of inference input image nbytes; not physical copies or RSS',
+            latency_by_scope={}, parent_rss=rss(),
+            worker_resource_scope='per-result worker RSS samples; GPU process lifetime allocator peaks incl startup; unavailable on fixtures/CPU')
+        self.report['performance']['progress_checkpoint_seconds']=.25
+        self.report['performance']['metadata_budget_scope']='serialized UTF-8 report; not Python heap or process RSS; failure reserve is additional'
+        self.report['performance']['running_windows_peak']=0
+        self.report['performance']['pending_windows_peak']=0
 
     def stop(self):
         self.stop_event.set()
@@ -531,17 +578,48 @@ class StreamingSession:
         """Called under the condition lock; artifacts precede observable status."""
         from .temporal import TERMINAL
         for row in self.rows:
-            self.aggregate.update(row)
+            if row['outcome'] in TERMINAL and row['window_id'] not in self.aggregate_ids:
+                self.aggregate.update(row)
+                self.aggregate_ids.add(row['window_id'])
         phase=self.report['phase']
+        perf=self.report['performance']
+        perf['running_windows_peak']=max(perf['running_windows_peak'],sum(r['outcome']=='processing' for r in self.rows))
+        perf['pending_windows_peak']=max(perf['pending_windows_peak'],int(self.pending is not None))
+        perf['aggregate_records']=len(self.aggregate.results)
         reason={'complete':'eof','stopped':'user_stop','failed':'failure'}.get(phase)
+        previous_reason=self.aggregate.final_reason
         self.report['aggregate']=self.aggregate.snapshot(self.report['observed_horizon_seconds'],
             pending=sum(r['outcome'] not in TERMINAL for r in self.rows),finalization_reason=reason)
-        save_report(self.output, self.report)
+        began=time.perf_counter()
+        try:
+            save_report(self.output, self.report)
+        except Exception:
+            # A failed write must not commit an aggregator finalization that
+            # prevents a subsequent failure report with the same evidence.
+            self.aggregate.final_reason=previous_reason
+            raise
+        observe(self.report['performance']['persistence'],time.perf_counter()-began)
+        self.report['performance']['persistence']['bytes_written_total'] += sum(
+            (self.output/name).stat().st_size for name in ('report.json','windows.csv'))
+        self.last_progress_save=time.monotonic()
+        self.report['performance']['last_report_bytes']=(self.output/'report.json').stat().st_size
 
     def _phase(self, phase, message):
         with self.condition:
             self.report.update(phase=phase, message=message)
-            self._save()
+            if phase in ('complete','stopped','failed'):
+                self.report['performance']['aggregate_evidence_serialized_bytes']=len(
+                    json.dumps(self.aggregate.results,ensure_ascii=False).encode('utf-8'))
+            try:
+                self._save()
+            except Exception as error:
+                if phase not in ('complete','stopped'):
+                    raise
+                self.failure=error
+                phase='failed'
+                message=str(error)
+                self.report.update(phase=phase,message=message)
+                self._save()
             atomic_json(self.output/'status.json', dict(phase=phase, message=message))
         self.progress(phase, message)
 
@@ -584,10 +662,16 @@ class StreamingSession:
                     self._save()
                     continue
                 row['outcome'] = 'processing'
+                queue_seconds=max(0.,time.monotonic()-self.started-window.get('ready_elapsed_seconds',time.monotonic()-self.started))
                 self._save()
             try:
+                infer_began=time.perf_counter()
                 result = worker.infer(window)
+                roundtrip=time.perf_counter()-infer_began
                 with self.condition:
+                    if len(json.dumps(result,ensure_ascii=False,allow_nan=False).encode('utf-8'))>self.max_window_metadata_bytes:
+                        raise ValueError('Window metadata budget exceeded before evidence acceptance')
+                    self.report['performance']['ipc_raw_payload_bytes_total'] += sum(s['image'].nbytes for s in window['samples'])
                     if result.get('outcome') not in ('decided','unable_to_decide'):
                         raise ValueError('Window executor returned an invalid disposition')
                     for key in ('window_id','source_id','session_id','index','window_contract_version',
@@ -599,9 +683,12 @@ class StreamingSession:
                     # already finalized decision.
                     self.aggregate.update(dict(row,**result))
                     row.update(result)
+                    row['timing']=window_timing(result,queue_seconds,roundtrip)
                     # Persistence is part of latency. First save makes result readable;
                     # second persists the measured availability timestamp itself.
+                    persist_began=time.perf_counter()
                     self._save()
+                    row['timing']['persistence_seconds']=time.perf_counter()-persist_began
                     elapsed = time.monotonic()-self.started
                     origin=(window.get('ready_elapsed_seconds',elapsed) if self.analysis_mode=='offline_window'
                             else row['end_seconds'])
@@ -691,23 +778,42 @@ class StreamingSession:
                     raise StreamStopped()
                 if self.failure is not None:
                     raise self.failure
+                read_began=time.perf_counter()
                 event=reader.read() if reader else next(events)
+                read_elapsed=time.perf_counter()-read_began
+                with self.condition:
+                    if hasattr(source,'measurements'):
+                        self.report['performance']['native_decode']=dict(source.measurements)
+                    observe(self.report['performance']['source_read'],read_elapsed)
                 seconds=event.get('sampling_tick_seconds',event.get('timestamp_seconds',event.get('seconds',timeline.watermark)))
                 if (isinstance(seconds,bool) or not isinstance(seconds,(int,float)) or not math.isfinite(seconds) or
                         seconds<0 or seconds>timeline.max_seconds):
                     raise ValueError('Source duration budget exceeded or invalid event time')
                 if self.analysis_mode=='stream':
                     self._wait_media(seconds)
+                admission_began=time.perf_counter()
                 windows=timeline.accept(event)
+                admission_elapsed=time.perf_counter()-admission_began
                 with self.condition:
+                    observe(self.report['performance']['admission'],admission_elapsed)
                     self.report['observed_horizon_seconds']=timeline.watermark
                     self.report['media_seconds']=timeline.watermark
                     self.report['source_events']=timeline.events
                     self.report['source_diagnostics']=list(timeline.diagnostics)
+                    self.report['performance'].update(timeline_raw_peak_bytes=timeline.peak_raw_bytes,
+                        timeline_identity_records=len(timeline.identities),
+                        window_sample_metadata=timeline.published_samples,
+                        emitted_window_batch_peak=max(self.report['performance'].get('emitted_window_batch_peak',0),len(windows)))
                 for window in windows:
                     submit(window)
                 with self.condition:
-                    self._save()
+                    # Terminal transitions are always persisted synchronously.
+                    # Coalesce progress at the next eligible event. A crash may
+                    # lose uncheckpointed progress, never fabricate observation;
+                    # slow/idle sources do not promise a wall-clock flush deadline.
+                    if time.monotonic()-self.last_progress_save>=.25:
+                        self._save()
+                        self.last_progress_save=time.monotonic()
                 if event['type']=='end':
                     break
             self._phase('draining','來源已結束，等待保留的窗完成')
@@ -775,6 +881,9 @@ class StreamingSession:
             consumer.start()
             duration = source.info['duration_seconds']
             count = int(math.ceil(duration/self.window_seconds-1e-10))
+            if (duration>self.timeline_limits['max_seconds'] or count>self.timeline_limits['max_windows'] or
+                    math.ceil(duration*self.sample_hz)>self.timeline_limits['max_events']):
+                raise ValueError('Legacy session duration/window/sample record budget exceeded')
             previous_index = -1
             for i in range(count):
                 start, end = i*self.window_seconds, min((i+1)*self.window_seconds, duration)
@@ -795,7 +904,13 @@ class StreamingSession:
                     index = min(int(timestamp*source.info['fps']), source.info['frame_count']-1)
                     if index == previous_index:
                         continue
+                    read_began=time.perf_counter()
                     image = source.read(index)
+                    read_elapsed=time.perf_counter()-read_began
+                    with self.condition:
+                        observe(self.report['performance']['source_read'],read_elapsed)
+                        if hasattr(source,'measurements'):
+                            self.report['performance']['native_decode']=dict(source.measurements)
                     previous_index = index
                     window['samples'].append(dict(frame_index=index, timestamp_seconds=index/source.info['fps'], image=image))
                     with self.condition:
@@ -829,11 +944,14 @@ class StreamingSession:
                         old = self.rows[self.pending['index']]
                         old.update(outcome='skipped', reason='overload_replaced_by_newer_window')
                     self.pending = window
+                    window['ready_elapsed_seconds']=time.monotonic()-self.started
                     row['outcome'] = 'waiting'
                     self.report['media_seconds'] = end
                     self._save()
                     self.condition.notify_all()
             source.finish()
+            if hasattr(source,'measurements'):
+                self.report['performance']['native_decode']=dict(source.measurements)
             self._phase('draining', '影片已結束，等待保留的時間窗完成')
         except StreamStopped:
             self._phase('stopping', '停止接收影格，完成正在推論的窗')

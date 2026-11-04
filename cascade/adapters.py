@@ -107,6 +107,7 @@ class FrameDetectorAdapter:
         load_seconds=time.perf_counter()-start
         warmup_seconds=0.
         forward_seconds=0.
+        tensor_seconds=0.
         per_video_forward_ms={r['video_name']:0. for r in records}
         accumulator=VideoScoreAccumulator()
         face_values: dict[str,list[float]]={r['video_name']:[] for r in records}
@@ -121,11 +122,14 @@ class FrameDetectorAdapter:
                 frames=[(path,r['label'],r['video_name']) for r in records for path in r['frames']]
                 for offset in range(0,len(frames),self.batch_size):
                     batch=frames[offset:offset+self.batch_size]
+                    tensor_began=time.perf_counter()
                     images=torch.stack([self._image(path) for path,_,_ in batch]).to(device)
                     # Model forward requires a tensor; this placeholder is NOT Ground Truth.
                     labels=torch.tensor([0 if label is None else label for _,label,_ in batch],
                                         dtype=torch.long,device=device)
-                    synchronize();began=time.perf_counter()
+                    synchronize()
+                    tensor_seconds+=time.perf_counter()-tensor_began
+                    began=time.perf_counter()
                     output=model({'image':images,'label':labels,'track_metrics':False},inference=True)
                     synchronize();elapsed=time.perf_counter()-began
                     forward_seconds+=elapsed
@@ -157,6 +161,6 @@ class FrameDetectorAdapter:
                 grouped.append(VideoScore(r['video_name'],r['label'],sum(frame_values)/len(frame_values),len(frame_values)))
             scores=tuple(grouped)
         return scores,dict(model_load_seconds=load_seconds,warmup_seconds=warmup_seconds,
-                                           forward_seconds=forward_seconds,stage_seconds=time.perf_counter()-start,
+                                           forward_seconds=forward_seconds,tensor_seconds=tensor_seconds,stage_seconds=time.perf_counter()-start,
                                            frame_count=sum(s.frame_count for s in scores),face_count=len(frames),batch_size=self.batch_size,
                                            per_video_forward_ms=per_video_forward_ms)

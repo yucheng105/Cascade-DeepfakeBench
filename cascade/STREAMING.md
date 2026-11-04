@@ -147,3 +147,75 @@ explicit window labels or a declared `all_windows` truth scope. No source-level
 label is implicitly copied to its windows, and overlap is not independent data.
 Emitted policies remain pending independent review. Real connectors, v2 GPU
 throughput and scientific quality are UNVERIFIED by the lightweight fixture suite.
+
+## Phase 4 measurement and retention
+
+New reports add `performance.schema_version=1`, retaining report schema v4 and
+all existing decisions/trace/aggregate fields. `latency_by_scope` reports exact
+nearest-rank p50/p95, observed max and sample count for decided windows, separated
+by `since_window_admission` and `since_media_window_end`. Startup/warmup is separate.
+The observed maximum is not a worst-case guarantee. No deployment SLO is assumed;
+`slo_verdict` remains `NOT_EVALUATED`.
+
+Window `timing` separates parent queue, worker RPC roundtrip, profile preparation
+(face/crop/PNG/cache), tensor preparation/transfer/synchronization, forward and
+first-result persistence. These scopes overlap and must not be added together.
+An unavailable or unreached measurement is null, with scope/reason text; fixture
+adapters do not establish native model timing. Streaming's old availability
+latency keeps its meaning. The timing update itself needs a second save, which
+is not included in its own first-result persistence measurement.
+
+Source read is the parent's roundtrip; `native_decode`, when using VideoSource,
+is measured inside the decoder and includes validation, excluding IPC. RSS samples
+are current-process working set/resident pages; sampled and OS peaks are named
+separately. The worker reports CPU RSS and, on CUDA, process-lifetime allocator
+allocated/reserved peaks including startup. These are not total machine VRAM.
+IPC counters are logical raw image bytes, not measured physical copy counts.
+Persistence counters describe completed saves *before* the current snapshot;
+the current write cannot report its own final byte count/duration. Atomic replace
+does not promise power-loss durability/fsync. Measurement overhead is included in
+wall elapsed; no uninstrumented throughput claim is made.
+
+| Data | Retention / limit | Limit behavior |
+| --- | --- | --- |
+| Running/pending/raw/crop | Existing one-running/one-pending and cache ceilings | Latest pending replacement; explicit skip/failure |
+| Source identity/ticks/sample memberships | Existing event/sample budgets; diagnostics <= 1,000 | Fail explicitly; retain partial evidence |
+| Windows | Default 10,000, including legacy MP4 mode | Refuse exceeding declared count; legacy cadence also checks sample budget |
+| Worker result metadata | Default 512 KiB UTF-8 JSON; configurable downward | Reject oversized result before terminal evidence acceptance |
+| Complete report metadata | Default 64 MiB UTF-8 JSON | Fail at snapshot budget; leave previous atomic report readable |
+| Failure report | Additional 4 MiB reserve | Persist failure and accepted evidence within reserve; hard write failure remains explicit |
+| Active rows / aggregate | Complete evidence retained under record and report limits | No silent eviction; logical bytes are not Python heap/RSS limits |
+| API view/cache | One latest stripped report cache across jobs, keyed by file identity/version | All windows remain visible; full geometry stays in download |
+| Disk / history | Complete report/CSV retained; no automatic deletion or global disk quota | Operator manages job history and uploads; disk errors fail explicitly |
+
+Session constructors accept `max_report_bytes` and `max_window_metadata_bytes`
+(at most 512 KiB per worker result), alongside existing record/time/event budgets.
+These are serialized-metadata budgets, not a total memory promise. CSV is a
+projection of the full report; atomic temporary JSON/CSV files add transient disk
+space. Source uploads, manifests, legacy offline histories and global job count
+have separate lifetimes and are not covered by the report budget.
+
+Progress-only saves are coalesced at the next eligible source event, at least
+0.25 processing seconds after the previous save. Terminal transitions remain
+synchronously saved. A crash may lose uncheckpointed progress; an idle/blocked
+source does not have a wall-clock flush guarantee. Restart finalizes only stored
+observation and never fabricates missing progress. Completed evidence is not
+repeatedly deep-copied into the aggregator; its public replay/conflict rules stay
+unchanged. Polling caches unchanged reports without retaining a full report for
+every completed streaming job. No pagination or frontend change is required.
+
+From the workspace root, run a fresh, bounded capacity experiment using the
+existing preprocessing environment:
+
+```text
+Cascade-DeepfakeBench/.venv-preprocessing/Scripts/python.exe -B tools/measure_streaming_capacity.py --output data/phase4/my-new-run
+```
+
+The protocol freezes 32/128/256 windows, two repetitions, an eight-window warmup,
+.2/.2-second cadence, 20 Hz, four 16x16 frames per window, Offline Window and
+20-ms polling delay. It uses actual Cascade routing with controlled scores,
+not real detector inference. Save source/protocol hashes with every run. Media
+duration differs from elapsed duration, and this is not an equal-duration soak.
+Keep original timeout/failure evidence and compare only completed paired cases.
+Camera/RTSP, formal quality, real GPU throughput and SLO compliance remain
+unverified by this tool. No batch/cadence/timeout tuning is applied automatically.

@@ -89,6 +89,7 @@ class WindowTimeline:
         self.events=0
         self.diagnostics=[]
         self.closed=False
+        self.peak_raw_bytes=0
 
     def log(self, reason, **fields):
         if len(self.diagnostics)>=1000:
@@ -189,7 +190,9 @@ class WindowTimeline:
 
     def check_budget(self):
         unique={id(s['image']):s['image'] for s in self.samples+self.candidates}
-        if sum(image.nbytes for image in unique.values())>self.budget:
+        used=sum(image.nbytes for image in unique.values())
+        self.peak_raw_bytes=max(self.peak_raw_bytes,used)
+        if used>self.budget:
             raise ValueError('Source raw cache budget exceeded')
 
 
