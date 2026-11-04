@@ -91,10 +91,12 @@ Policy JSON uses Phase 1 schema v1, a `policy_id` and a matching canonical
 by this entry. Intermediate real <= low / fake >= high; final real < t / fake >= t.
 Each policy detector is unique, thresholds finite, terminal low=high. Unsupported
 metrics/comparators, wrong datasets and fusion policies are refused. Phase 1
-artifacts marked `deployment_ready=false` require `--allow-exploratory`; omitting
-that flag requires a deployment marker plus matching `checkpoint_sha256` and
-`config_sha256` dictionaries keyed by detector. Hash binding is compatibility
-validation, not proof of statistical calibration or provenance correctness.
+artifacts marked `deployment_ready=false` require `--allow-exploratory`.
+Deployment-ready policies now require target FAR, a cost scope, the complete input
+contract and checkpoint/config/preprocessing SHA-256 mappings. Supplied metadata
+is validated and declared bindings are checked even with `--allow-exploratory`.
+See [POLICY_CONTRACT.md](POLICY_CONTRACT.md) for fields, compatibility and entry-point
+gates. Hash binding is not proof of statistical calibration or provenance correctness.
 
 Default weights are `training/weights/{xception_best.pth,ucf_best.pth,FFc23.tar}`.
 Use repeatable `--checkpoint DETECTOR=PATH` or `--config DETECTOR=PATH` overrides
@@ -124,7 +126,10 @@ available via an explicit `--config sbi=...` override for models trained for tha
 normalization. This runtime's SBI graph targets the official-style checkpoint;
 normalization override alone does not certify a legacy DeepfakeBench-trained SBI
 checkpoint's architecture. Full equivalence to official face cropping and historical CSV provenance
-is not asserted. Landmarks are not used by these models'
+is not asserted. The manifest explicitly records this input as
+`legacy_preprocessed_face_crops` and describes sampling/aggregation in
+`input_contract`; declaring an official RetinaFace input policy does not turn
+existing dataset crops into official SBI crops. Landmarks are not used by these models'
 RGB-only inference forward; SBI synthesis/training is a different data path.
 
 Outputs (new directory only; no overwrite):
@@ -181,7 +186,12 @@ batch["video_name"]  # list[str], aligned with batch["image"]
 The adapter also provides `indices_for_videos()` and `subset_for_videos()` so a
 later stage can receive all and only the frames belonging to uncertain videos.
 
-## Stage 1: Xception
+## Legacy two-stage dataset benchmark: Xception to UCF
+
+The following `cascade/test.py` example is the original two-stage research entry.
+Its shared-input validator assumes matching tensors for Xception/UCF. It is not
+the policy-driven three-detector controller and should not be extended by forcing
+SBI to use their tensor profile. Prefer `cascade.offline` or `cascade.video` above.
 
 Inside the Docker container, run the first stage from the repository mount:
 

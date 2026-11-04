@@ -10,7 +10,7 @@ from .controller import run_cascade
 from .download_face_model import MODEL_PATH, MODEL_URL, MODEL_SHA256
 from .model_loader import REPO_ROOT, sha256
 from .offline import DEFAULT_CONFIGS, source_state, write_csv, write_json
-from .policy import validate_policy
+from .policy import validate_policy, validate_runtime_input, validate_runtime_bindings
 from .video_input import SAMPLING, VideoLimits
 from .preprocessing import ProfileCache, atomic_json, PROFILE_FOR_MODEL
 
@@ -45,6 +45,11 @@ def run_video(video: Path, output: Path, *, policy_path: Path | None = None,
         raise ValueError('影片為空或超過 200 MiB 上限')
     if batch_size < 1 or not 1 <= max_frames <= 32:
         raise ValueError('batch_size 必須為正數；max_frames 需介於 1–32')
+    names = [s['detector'] for s in policy['stages']]
+    input_contract = dict(unit='video', sampling=SAMPLING, max_frames=max_frames,
+        profiles={n:PROFILE_FOR_MODEL[n] if preprocessing_mode=='official' else 'yunet_legacy' for n in names},
+        aggregation={n:'max_face_then_mean_frame' for n in names})
+    validate_runtime_input(policy, input_contract)
     output.mkdir(parents=True, exist_ok=False)
 
     def update(phase, message):
@@ -65,10 +70,10 @@ def run_video(video: Path, output: Path, *, policy_path: Path | None = None,
         torch.backends.cudnn.deterministic = True
         if target.type == 'cuda':
             torch.cuda.manual_seed_all(1024)
-        names = [s['detector'] for s in policy['stages']]
         defaults = dict(xception='xception_best.pth', ucf='ucf_best.pth', sbi='FFc23.tar')
         input_hash = sha256(video)
         manifest = dict(schema_version=2, input_video=str(video.resolve()), input_sha256=input_hash,
+                        input_contract=input_contract,
                         original_filename=original_filename or video.name, dataset_id='uploaded_video',
                         ground_truth=None, inference_label_tensor_placeholder=0,
                         policy=policy, policy_sha256=sha256(policy_path),
@@ -93,9 +98,7 @@ def run_video(video: Path, output: Path, *, policy_path: Path | None = None,
             import hashlib
             adapter.provenance['preprocessing_sha256']=hashlib.sha256(json.dumps(
                 dict(tensor=adapter.provenance['preprocessing'],face_profile=definition),sort_keys=True).encode()).hexdigest()
-            expected=policy.get('preprocessing_sha256',{}).get(name)
-            if expected is not None and expected!=adapter.provenance['preprocessing_sha256']:
-                raise ValueError('Policy preprocessing binding mismatch: '+name)
+        validate_runtime_bindings(policy, {n:a.provenance for n,a in adapters.items()})
         manifest.update(preprocessing=cache.summary(),models={n:a.provenance for n,a in adapters.items()})
         atomic_json(output/'manifest.json',manifest)
         record = dict(video_name='upload_'+input_hash, label=None)

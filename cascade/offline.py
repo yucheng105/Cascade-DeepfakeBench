@@ -13,7 +13,7 @@ import time
 from .controller import run_cascade
 from .model_loader import REPO_ROOT,sha256
 from .offline_data import load_records
-from .policy import DATASETS,DETECTORS,validate_policy
+from .policy import DATASETS,DETECTORS,validate_policy,validate_runtime_input,validate_runtime_bindings
 
 DEFAULT_CONFIGS={name:REPO_ROOT/'training/config/detector'/f'{name}.yaml' for name in DETECTORS}
 DEFAULT_CONFIGS['sbi']=REPO_ROOT/'cascade/configs/sbi_unit_range.yaml'
@@ -78,10 +78,14 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError('Batch size must be positive')
         raw_policy=json.loads(args.policy.read_text(encoding='utf-8-sig'))
         policy=validate_policy(raw_policy,DATASETS[args.dataset],allow_exploratory=args.allow_exploratory)
+        names=[s['detector'] for s in policy['stages']]
+        input_contract=dict(unit='video',sampling='first_N_numeric_sorted_frames',max_frames=args.max_frames,
+                            profiles={n:'preprocessed_face_crops' for n in names},
+                            aggregation={n:'mean_frame_probability' for n in names})
+        validate_runtime_input(policy,input_contract)
         records=load_records(args.dataset_json,args.rgb_root,args.dataset,
                              compression=args.compression,max_frames=args.max_frames)
         configs=overrides(args.config);checkpoints=overrides(args.checkpoint)
-        names=[s['detector'] for s in policy['stages']]
         if (set(configs)|set(checkpoints))-set(names):
             raise ValueError('Overrides name detectors absent from policy')
         import torch
@@ -101,12 +105,9 @@ def main(argv: list[str] | None = None) -> int:
                      configs.get(name,DEFAULT_CONFIGS[name]),
                      checkpoints.get(name,REPO_ROOT/'training/weights'/defaults[name]),
                      device,args.batch_size) for name in names}
-        if not args.allow_exploratory:
-            for name,adapter in adapters.items():
-                for key in ('checkpoint_sha256','config_sha256'):
-                    if policy[key][name]!=adapter.provenance[key]:
-                        raise ValueError('Policy binding does not match runtime '+key+' for '+name)
+        validate_runtime_bindings(policy,{n:a.provenance for n,a in adapters.items()})
         manifest=dict(schema_version=1,policy=policy,policy_sha256=sha256(args.policy),
+                      input_contract=input_contract,input_profile_status='legacy_preprocessed_face_crops',
                       dataset=args.dataset,compression=args.compression,
                       dataset_json=str(args.dataset_json.resolve()),dataset_json_sha256=sha256(args.dataset_json),
                       rgb_root=str(args.rgb_root.resolve()),sampling='first_N_numeric_sorted_frames',

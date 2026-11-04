@@ -45,7 +45,12 @@ is the explicit preparation command). There is no automatic fallback.
 Use `--policy cascade/policies/uploaded_video_all_stages.json` to exercise all
 three stages. These policies remain exploratory and uncalibrated for the repaired
 profiles; deployment_ready is false. Profile-bound policies reject hash mismatch.
-The existing `cascade.offline` cropped-dataset path retains its behavior.
+The existing `cascade.offline` cropped-dataset path retains its inference behavior,
+but now rejects declared policy/input/asset mismatches before classification and
+explicitly records its legacy crop scope. Uploads also check all supplied asset
+bindings, including in exploratory mode. The uploaded-video entry remains
+exploratory-only. See [POLICY_CONTRACT.md](POLICY_CONTRACT.md) for the schema-v1
+extension, input contracts and unchanged terminal/failure semantics.
 
 ## Compatibility and reproducibility
 
