@@ -9,7 +9,7 @@ from .policy import validate_policy
 from .video_scoring import route_video_scores, route_final_stage, UNCERTAIN
 
 
-def run_cascade(records: list[dict], policy: dict, adapters: dict) -> dict:
+def run_cascade(records: list[dict], policy: dict, adapters: dict, *, on_trace=None) -> dict:
     started=time.perf_counter()
     dataset_id=policy.get('dataset_id')
     if not isinstance(dataset_id,str):
@@ -51,6 +51,7 @@ def run_cascade(records: list[dict], policy: dict, adapters: dict) -> dict:
                               detector=stage['detector'],score=s.score,frames=s.frame_count,
                               decision=s.decision,low=stage['low'],high=stage['high'],
                               allocated_forward_ms=timing.get('per_video_forward_ms',{}).get(s.video_name)))
+            if on_trace is not None:on_trace(list(trace))
             if s.decision==UNCERTAIN:
                 uncertain.add(s.video_name)
             else:

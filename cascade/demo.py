@@ -20,7 +20,11 @@ PAGE = Path(__file__).resolve().parent/'demo.html'
 
 
 class DemoState:
-    def __init__(self, root: Path, device='cuda', face_model: Path = MODEL_PATH, runner=run_video):
+    def __init__(self, root: Path, device='cuda', face_model: Path = MODEL_PATH, runner=run_video,
+                 preprocessing_mode='official', profile_timeout=180, cache_max_bytes=512*1024*1024):
+        self.preprocessing_mode=preprocessing_mode
+        self.profile_timeout=profile_timeout
+        self.cache_max_bytes=cache_max_bytes
         self.root = root.resolve()
         self.root.mkdir(parents=True, exist_ok=True)
         self.device, self.face_model, self.runner = device, face_model, runner
@@ -44,14 +48,14 @@ class DemoState:
             except (OSError, ValueError, KeyError):
                 continue
 
-    def reserve(self, filename, policy):
+    def reserve(self, filename, policy, preprocessing_mode=None):
         with self.lock:
             if self.active is not None:
                 raise RuntimeError('已有影片正在處理，請等待完成後再上傳')
             job_id = uuid.uuid4().hex
             folder = self.root/job_id
             folder.mkdir(exist_ok=False)
-            job = dict(id=job_id, filename=filename, policy=policy, phase='uploading', message='接收影片')
+            job = dict(id=job_id, filename=filename, policy=policy, preprocessing_mode=preprocessing_mode or self.preprocessing_mode, phase='uploading', message='接收影片')
             write_json(folder/'job.json', job)
             self.jobs[job_id] = job
             self.active = job_id
@@ -69,7 +73,10 @@ class DemoState:
 
     def snapshot(self, job_id):
         with self.lock:
-            return dict(self.jobs[job_id])
+            job=dict(self.jobs[job_id])
+            job['diagnostic_files']=[name for name in ('error.json','manifest.json','preprocessing.json','partial_trace.json')
+                if (self.root/job_id/'result'/name).is_file()]
+            return job
 
     def start(self, job_id):
         def work():
@@ -79,6 +86,8 @@ class DemoState:
                                      policy_path=POLICIES[job['policy']], device=self.device,
                                      face_model=self.face_model, allow_exploratory=True,
                                      original_filename=job['filename'],
+                                     preprocessing_mode=job.get('preprocessing_mode',self.preprocessing_mode),
+                                     profile_timeout=self.profile_timeout,cache_max_bytes=self.cache_max_bytes,
                                      progress=lambda p, m: self.update(job_id,
                                          'finalizing' if p == 'complete' else p, m))
                 with self.lock:
@@ -96,8 +105,10 @@ class DemoServer(ThreadingHTTPServer):
     demo_state: DemoState
 
 
-def make_server(root: Path, *, port=8765, device='cuda', face_model: Path = MODEL_PATH, runner=run_video):
-    state = DemoState(root, device, face_model, runner)
+def make_server(root: Path, *, port=8765, device='cuda', face_model: Path = MODEL_PATH, runner=run_video,
+                preprocessing_mode='official',profile_timeout=180,cache_max_bytes=512*1024*1024):
+    if preprocessing_mode not in ('official','legacy'):raise ValueError('Invalid preprocessing mode')
+    state = DemoState(root, device, face_model, runner,preprocessing_mode,profile_timeout,cache_max_bytes)
 
     class Handler(BaseHTTPRequestHandler):
         def local_request(self):
@@ -173,6 +184,7 @@ def make_server(root: Path, *, port=8765, device='cuda', face_model: Path = MODE
                 self.end_headers()
             elif path == '/api/config':
                 self.send_json(dict(device=state.device, max_bytes=VideoLimits().max_bytes,
+                                    default_preprocessing_mode=state.preprocessing_mode, profile_timeout=state.profile_timeout, cache_max_bytes=state.cache_max_bytes,
                                     limits=f'MP4 · ≤200 MiB · ≤{VideoLimits().max_seconds} 秒（{VideoLimits().max_seconds // 60} 分鐘） · ≤1920×1080 像素 · 最多 32 幀'))
             elif path == '/api/jobs':
                 with state.lock:
@@ -180,13 +192,15 @@ def make_server(root: Path, *, port=8765, device='cuda', face_model: Path = MODE
                                     for j in list(state.jobs.values())[-10:][::-1]])
             else:
                 match = re.fullmatch(r'/api/jobs/([0-9a-f]{32})', path)
-                file_match = re.fullmatch(r'/jobs/([0-9a-f]{32})/(input\.mp4|report\.json|manifest\.json|decisions\.csv|trace\.csv|frames/\d{8}\.png)', path)
+                file_match = re.fullmatch(r'/jobs/([0-9a-f]{32})/(input\.mp4|report\.json|manifest\.json|preprocessing\.json|partial_trace\.json|error\.json|decisions\.csv|trace\.csv|frames/\d{8}\.png|profiles/(?:dlib81|retinaface|yunet_legacy)/(?:\d{8}_\d{4}\.png|partial\.json|result\.json|worker_error\.json))', path)
                 if match and match[1] in state.jobs:
                     self.send_json(state.snapshot(match[1]))
                 elif file_match and file_match[1] in state.jobs:
                     folder = state.root/file_match[1]
                     filename = file_match[2]
-                    self.send_file(folder/filename if filename == 'input.mp4' else folder/'result'/filename)
+                    target=(folder/filename if filename=='input.mp4' else folder/'result'/filename).resolve()
+                    if not target.is_relative_to(folder.resolve()):self.send_json(dict(error='Invalid artifact path'),403)
+                    else:self.send_file(target)
                 else:
                     self.send_json(dict(error='找不到工作或檔案'), 404)
 
@@ -201,16 +215,17 @@ def make_server(root: Path, *, port=8765, device='cuda', face_model: Path = MODE
             query = parse_qs(parsed.query)
             filename = query.get('filename', [''])[0].replace('\\', '/').rsplit('/', 1)[-1]
             policy = query.get('policy', ['early'])[0]
+            mode=query.get('preprocessing_mode',[state.preprocessing_mode])[0]
             try:
                 length = int(self.headers.get('Content-Length', '0'))
             except ValueError:
                 length = 0
-            if not filename.lower().endswith('.mp4') or len(filename) > 180 or policy not in POLICIES or \
+            if not filename.lower().endswith('.mp4') or len(filename) > 180 or policy not in POLICIES or mode not in ('official','legacy') or \
                     query.get('exploratory') != ['true'] or not 0 < length <= VideoLimits().max_bytes:
                 self.send_json(dict(error='需有效 MP4、大小 ≤200 MiB，並確認探索模式'), 400)
                 return
             try:
-                job_id = state.reserve(filename, policy)
+                job_id = state.reserve(filename, policy,mode)
             except RuntimeError as error:
                 self.send_json(dict(error=str(error)), 409)
                 return
@@ -244,8 +259,12 @@ def main(argv=None):
     parser.add_argument('--runs-root', type=Path, default=Path(__file__).resolve().parents[2]/'data/video_demo_runs')
     parser.add_argument('--face-model', type=Path, default=MODEL_PATH)
     parser.add_argument('--open-browser', action='store_true')
+    parser.add_argument('--preprocessing-mode',choices=('official','legacy'),default='official')
+    parser.add_argument('--profile-timeout',type=float,default=180)
+    parser.add_argument('--cache-mib',type=int,default=512)
     args = parser.parse_args(argv)
-    server = make_server(args.runs_root, port=args.port, device=args.device, face_model=args.face_model)
+    server = make_server(args.runs_root, port=args.port, device=args.device, face_model=args.face_model,
+                         preprocessing_mode=args.preprocessing_mode,profile_timeout=args.profile_timeout,cache_max_bytes=args.cache_mib*1024*1024)
     address = f'http://127.0.0.1:{server.server_port}'
     print('CASCAde Offline Demo: '+address, flush=True)
     if args.open_browser:

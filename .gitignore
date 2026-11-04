@@ -13,3 +13,7 @@ datasets/rgb/*
 
 # Local training and evaluation artifacts
 logs/
+.venv-preprocessing/
+preprocessing-readiness.json
+cascade/assets/preprocessing/*.pth
+cascade/assets/preprocessing/*.zip

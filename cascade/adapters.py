@@ -5,9 +5,10 @@ import json
 import hashlib
 from pathlib import Path
 import time
+from typing import Any
 
 from .model_loader import load_model,sha256
-from .video_scoring import VideoScoreAccumulator
+from .video_scoring import VideoScoreAccumulator, VideoScore
 
 
 class FrameDetectorAdapter:
@@ -34,7 +35,7 @@ class FrameDetectorAdapter:
                      input=input_profile,sampling=sampling)
         if len(profile['mean'])!=3 or len(profile['std'])!=3 or any(x<=0 for x in profile['std']):
             raise ValueError('Invalid detector normalization')
-        self.provenance=dict(detector=name,checkpoint=str(self.checkpoint),checkpoint_sha256=sha256(self.checkpoint),
+        self.provenance: dict[str, Any]=dict(detector=name,checkpoint=str(self.checkpoint),checkpoint_sha256=sha256(self.checkpoint),
                              config=str(config_path.resolve()),config_sha256=sha256(config_path),
                              initialization='complete_checkpoint_strict_no_imagenet_preload',
                              checkpoint_mapping='official_net_to_backbone' if name=='sbi' else 'detector_state_dict',
@@ -71,6 +72,7 @@ class FrameDetectorAdapter:
         forward_seconds=0.
         per_video_forward_ms={r['video_name']:0. for r in records}
         accumulator=VideoScoreAccumulator()
+        face_values: dict[str,list[float]]={r['video_name']:[] for r in records}
         try:
             with torch.inference_mode():
                 if self.warmup:
@@ -96,10 +98,28 @@ class FrameDetectorAdapter:
                         raise ValueError('Detector output must provide one fake probability per frame')
                     accumulator.update(output['prob'].detach().cpu().reshape(-1).tolist(),
                                        [label for _,label,_ in batch],[name for _,_,name in batch])
+                    for value,(_,_,video_name) in zip(output['prob'].detach().cpu().reshape(-1).tolist(),batch):
+                        face_values[video_name].append(value)
         finally:
             del model
             if device.type=='cuda':torch.cuda.empty_cache()
-        return accumulator.finalize(),dict(model_load_seconds=load_seconds,warmup_seconds=warmup_seconds,
+        scores=accumulator.finalize()
+        if any('face_groups' in r for r in records):
+            grouped=[]
+            for r in records:
+                groups=r.get('face_groups')
+                if not groups or [p for g in groups for p in g['faces']]!=r['frames']:
+                    raise ValueError('Face groups must exactly partition the selected source-frame faces')
+                if len({g['frame_index'] for g in groups})!=len(groups):
+                    raise ValueError('Source frame IDs must be unique within a profile')
+                values=face_values[r['video_name']];offset=0;frame_values=[]
+                for group in groups:
+                    n=len(group['faces'])
+                    if not n:raise ValueError('Empty source-frame face group')
+                    frame_values.append(max(values[offset:offset+n]));offset+=n
+                grouped.append(VideoScore(r['video_name'],r['label'],sum(frame_values)/len(frame_values),len(frame_values)))
+            scores=tuple(grouped)
+        return scores,dict(model_load_seconds=load_seconds,warmup_seconds=warmup_seconds,
                                            forward_seconds=forward_seconds,stage_seconds=time.perf_counter()-start,
-                                           frame_count=len(frames),batch_size=self.batch_size,
+                                           frame_count=sum(s.frame_count for s in scores),face_count=len(frames),batch_size=self.batch_size,
                                            per_video_forward_ms=per_video_forward_ms)

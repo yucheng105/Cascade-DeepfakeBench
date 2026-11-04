@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import cv2
@@ -114,16 +115,16 @@ class VideoInputTests(unittest.TestCase):
 class VideoPipelineTests(unittest.TestCase):
     def test_no_face_keeps_error_artifacts_without_a_prediction(self):
         from cascade.video import run_video
-        class NoFaces:
-            def crop(self, image):
-                return None, dict(reason='no_face', face_count=0)
+        from cascade.preprocessing import execute_request
+        def process(request,timeout):
+            return execute_request(request,face_factory=lambda profile:lambda image:[])
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp); source = root/'input.mp4'; make_video(source)
             output = root/'failed'
-            with patch('cascade.video.YuNetFaces', return_value=NoFaces()), \
-                    patch('cascade.adapters.FrameDetectorAdapter'):
-                with self.assertRaisesRegex(ValueError, '沒有產生真假判定'):
-                    run_video(source, output, device='cpu', allow_exploratory=True)
+            with patch('cascade.preprocessing.run_process', side_effect=process), \
+                    patch('cascade.adapters.FrameDetectorAdapter',return_value=SimpleNamespace(provenance={})):
+                with self.assertRaisesRegex(ValueError, 'no valid faces'):
+                    run_video(source, output, device='cpu', allow_exploratory=True,preprocessing_mode='legacy')
             self.assertTrue((output/'error.json').is_file())
             self.assertTrue((output/'preprocessing.json').is_file())
             self.assertFalse((output/'report.json').exists())
@@ -132,6 +133,12 @@ class VideoPipelineTests(unittest.TestCase):
     def test_mp4_to_unknown_label_artifacts_and_no_overwrite(self):
         from cascade.video import run_video, POLICIES
         from cascade.video_scoring import VideoScore
+        from cascade.preprocessing import execute_request
+        def process(request,timeout):
+            def faces(image):
+                crop,info=FixtureFaces().crop(image)
+                return [(crop,info)]
+            return execute_request(request,face_factory=lambda profile:faces)
         class Adapter:
             def __init__(self, name, *args, **kwargs):
                 self.name = name
@@ -142,10 +149,10 @@ class VideoPipelineTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp); source = root/'input.mp4'; make_video(source)
             output = root/'run'
-            with patch('cascade.video.YuNetFaces', return_value=FixtureFaces()), \
+            with patch('cascade.preprocessing.run_process', side_effect=process), \
                     patch('cascade.adapters.FrameDetectorAdapter', Adapter):
                 result = run_video(source, output, policy_path=POLICIES['all_stages'],
-                                   device='cpu', allow_exploratory=True)
+                                   device='cpu', allow_exploratory=True,preprocessing_mode='legacy')
                 self.assertEqual(len(result['trace']), 3)
                 self.assertIsNone(result['metrics']['acc'])
                 self.assertIsNone(result['decisions'][0]['label'])

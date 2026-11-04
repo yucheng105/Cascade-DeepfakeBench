@@ -1,0 +1,9 @@
+# Install torch==2.7.1 torchvision==0.22.1 from the cu128 index first.
+-r requirements-runtime.txt
+dlib-bin==20.0.1.post1
+scikit-image==0.24.0
+imutils==0.5.4
+albumentations==1.0.0
+# Then build/install retinaface-pytorch 0.0.8+torch27 using
+# python -m cascade.build_retinaface_compat (all upstream inference bytes unchanged).
+# See PREPROCESSING.md for the metadata-only compatibility patch and parity gates.

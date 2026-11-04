@@ -79,7 +79,7 @@ class YuNetFaces:
                           detection_score=float(face[14]), alignment_matrix=matrix)
 
 
-def prepare_video(path: Path, output: Path, limits: VideoLimits, faces, progress=None):
+def prepare_video(path: Path, output: Path, limits: VideoLimits, faces, progress=None, *, cache_max_bytes=None):
     if path.suffix.lower() != '.mp4' or not path.is_file():
         raise ValueError('請選擇可讀取的 MP4 檔案')
     if not 0 < path.stat().st_size <= limits.max_bytes:
@@ -90,6 +90,7 @@ def prepare_video(path: Path, output: Path, limits: VideoLimits, faces, progress
     began = time.perf_counter()
     samples = []
     decoded = 0
+    written_bytes=0
     try:
         if not cap.isOpened():
             raise ValueError('無法解碼影片；請使用有效的 MP4')
@@ -123,8 +124,15 @@ def prepare_video(path: Path, output: Path, limits: VideoLimits, faces, progress
             sample = dict(frame_index=index, timestamp_seconds=index/fps, **details)
             if crop is not None:
                 destination = frame_dir / f'{index:08d}.png'
-                if not cv2.imwrite(str(destination), crop):
-                    raise OSError('無法儲存人臉影格')
+                if cache_max_bytes is None:
+                    if not cv2.imwrite(str(destination), crop):
+                        raise OSError('無法儲存人臉影格')
+                else:
+                    ok,encoded=cv2.imencode('.png',crop)
+                    if not ok:raise OSError('Cannot encode raw frame')
+                    if written_bytes+encoded.nbytes>cache_max_bytes:raise ValueError('cache budget exceeded')
+                    with destination.open('xb') as stream:stream.write(encoded.tobytes())
+                    written_bytes+=encoded.nbytes
                 sample.update(path=str(destination.resolve()), sha256=sha256(destination))
             samples.append(sample)
             if progress:

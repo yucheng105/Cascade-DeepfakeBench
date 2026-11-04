@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "assets": {
+    "predictor": {
+      "relative_path": "preprocessing/dlib_tools/shape_predictor_81_face_landmarks.dat",
+      "sha256": "8cae4375589dd915d9a0a881101bed1bbb4e9887e35e63b024388f1ca25ff869",
+      "url": "https://github.com/SCLBD/DeepfakeBench/releases/download/v1.0.0/shape_predictor_81_face_landmarks.dat"
+    },
+    "retinaface": {
+      "relative_path": "cascade/assets/preprocessing/retinaface_resnet50_2020-07-20.pth",
+      "sha256": "b9fdd58c474d809b67166130b42d5913f00b48f912a3491565bc56b8a8a796f2",
+      "archive_sha256": "f168fae3ce6d6d3af69dd712049bfe857d3bc1422f715ac8ddfdf552ed7070ef",
+      "archive_member": "retinaface_resnet50_2020-07-20.pth",
+      "url": "https://github.com/ternaus/retinaface/releases/download/0.01/retinaface_resnet50_2020-07-20-f168fae3c.zip"
+    }
+  },
+  "packages": {
+    "torch": "2.7.1+cu128",
+    "torchvision": "0.22.1+cu128",
+    "numpy": "1.26.4",
+    "opencv-python-headless": "4.11.0.86",
+    "dlib-bin": "20.0.1.post1",
+    "scikit-image": "0.24.0",
+    "imutils": "0.5.4",
+    "retinaface-pytorch": "0.0.8+torch27",
+    "albumentations": "1.0.0"
+  },
+  "dlib_distribution": "dlib-bin, upstream dlib binary build by alesanfra/dlib-wheels; not an official PyPI dlib wheel",
+  "retinaface_compatibility": "0.0.8+torch27 changes only wheel version/dependency metadata; every upstream Python source byte is unchanged; reference parity is required"
+}

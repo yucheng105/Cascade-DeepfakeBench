@@ -156,8 +156,21 @@ class DemoHTTPTests(unittest.TestCase):
         self.assertEqual(self.request('POST', '/api/jobs?filename=a.mp4', b'x')[0], 400)
         self.assertEqual(self.request('POST', '/api/jobs?filename=a.exe&exploratory=true', b'x')[0], 400)
         self.assertEqual(self.request('POST', '/api/jobs?filename=a.mp4&policy=unknown&exploratory=true', b'x')[0], 400)
+        self.assertEqual(self.request('POST', '/api/jobs?filename=a.mp4&preprocessing_mode=invalid&exploratory=true', b'x')[0], 400)
         self.assertEqual(self.upload(b'')[0], 400)
         self.assertEqual(len(self.calls), 0)
+
+    def test_mode_selection_and_profile_download_whitelist(self):
+        self.release.set()
+        code,body=self.request('POST','/api/jobs?filename=a.mp4&exploratory=true&preprocessing_mode=legacy',b'valid')
+        self.assertEqual(code,202)
+        job_id=json.loads(body)['id'];self.assertEqual(self.settled(job_id)['phase'],'complete')
+        self.assertEqual(self.calls[0][1]['preprocessing_mode'],'legacy')
+        directory=self.root/job_id/'result/profiles/retinaface';directory.mkdir(parents=True)
+        (directory/'00000001_0000.png').write_bytes(b'pngfixture')
+        self.assertEqual(self.request('GET','/jobs/'+job_id+'/profiles/retinaface/00000001_0000.png'),(200,b'pngfixture'))
+        self.assertEqual(self.request('GET','/jobs/'+job_id+'/profiles/retinaface/../../manifest.json')[0],404)
+        self.assertEqual(self.request('GET','/jobs/'+job_id+'/profiles/unknown/00000001_0000.png')[0],404)
 
 
 if __name__ == '__main__':
