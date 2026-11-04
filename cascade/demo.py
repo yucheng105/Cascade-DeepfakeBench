@@ -5,6 +5,7 @@ import mimetypes
 import os
 from pathlib import Path
 import re
+import socket
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import threading
 import time
@@ -38,6 +39,9 @@ class DemoState:
                  stream_factory=StreamingSession):
         self.stream_factory = stream_factory
         self.sessions: dict[str, StreamingSession] = {}
+        self.server_started = time.time()
+        from .model_loader import sha256
+        self.server_build = sha256(Path(__file__))
         self.workers: list[threading.Thread] = []
         self.preprocessing_mode=preprocessing_mode
         self.profile_timeout=profile_timeout
@@ -168,7 +172,15 @@ class DemoState:
 
 
 class DemoServer(ThreadingHTTPServer):
+    # Windows SO_REUSEADDR can permit an old and a new server to bind the same
+    # port, creating a new-page/old-backend split. Require exclusive ownership.
+    allow_reuse_address = os.name != 'nt'
     demo_state: DemoState
+
+    def server_bind(self):
+        if os.name == 'nt':
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
 
     def server_close(self):
         if not hasattr(self, 'demo_state'):
@@ -278,7 +290,10 @@ def make_server(root: Path, *, port=8765, device='cuda', face_model: Path = MODE
                 self.send_header('Content-Length', '0')
                 self.end_headers()
             elif path == '/api/config':
-                self.send_json(dict(device=state.device, max_bytes=VideoLimits().max_bytes,
+                self.send_json(dict(api_version=2, analysis_modes=['offline','stream'],
+                                    server_pid=os.getpid(), server_started=state.server_started,
+                                    server_build=state.server_build,
+                                    device=state.device, max_bytes=VideoLimits().max_bytes,
                                     default_preprocessing_mode=state.preprocessing_mode, profile_timeout=state.profile_timeout, cache_max_bytes=state.cache_max_bytes,
                                     limits=f'MP4 · ≤200 MiB · ≤{VideoLimits().max_seconds} 秒（{VideoLimits().max_seconds // 60} 分鐘） · ≤1920×1080 像素 · 最多 32 幀'))
             elif path == '/api/jobs':
@@ -342,7 +357,7 @@ def make_server(root: Path, *, port=8765, device='cuda', face_model: Path = MODE
                         stream.write(block)
                         remaining -= len(block)
                 state.update(job_id, 'queued', '準備影片處理')
-                self.send_json(dict(id=job_id), 202)
+                self.send_json(dict(id=job_id, analysis_mode=analysis_mode, api_version=2), 202)
                 state.start(job_id)
             except (OSError, ValueError) as error:
                 state.fail(job_id, str(error))

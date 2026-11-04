@@ -60,6 +60,9 @@ class DemoHTTPTests(unittest.TestCase):
         code, body = self.request('GET', '/api/config')
         self.assertEqual(code, 200)
         config = json.loads(body)
+        self.assertEqual(config['api_version'], 2)
+        self.assertEqual(config['analysis_modes'], ['offline', 'stream'])
+        self.assertGreater(config['server_pid'], 0)
         self.assertEqual(config['max_bytes'], 200 * 1024 * 1024)
         self.assertIn('1200 秒', config['limits'])
         self.assertIn('32 幀', config['limits'])
@@ -70,6 +73,11 @@ class DemoHTTPTests(unittest.TestCase):
         self.assertIn('1200 秒（20 分鐘）', initial_limits)
         self.assertNotIn('120 秒', initial_limits)
         self.assertIn('超過 180 秒', page.decode('utf-8'))
+
+    @unittest.skipUnless(__import__('os').name=='nt', 'Windows exclusive port ownership')
+    def test_second_server_cannot_silently_share_a_listening_port(self):
+        with self.assertRaises(OSError):
+            make_server(self.root/'second', port=self.server.server_port, device='cpu')
 
     def settled(self, job_id):
         for _ in range(100):
