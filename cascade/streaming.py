@@ -19,6 +19,7 @@ import tempfile
 import threading
 import time
 import types
+import uuid
 from typing import Any
 
 from .model_loader import sha256
@@ -135,7 +136,8 @@ def _decoder(connection, video):
 class OfficialWindowEngine:
     """Reuse verified geometry and grouping; only transport/lifetime differ."""
     def __init__(self, output, device, mode, face_model, cache_max_bytes, policy=None,
-                 window_seconds=4., sample_hz=2., configs=None, checkpoints=None):
+                 window_seconds=4., sample_hz=2., configs=None, checkpoints=None,
+                 stride_seconds=None, window_contract_version=1):
         import torch
         from .adapters import FrameDetectorAdapter, bind_face_profile
         from .face_profiles import build_faces
@@ -155,7 +157,8 @@ class OfficialWindowEngine:
         self.policy, policy_hash = frozen_policy(policy)
         names = [s['detector'] for s in self.policy['stages']]
         self.input_contract = execution_contract(names,unit='window',mode=mode,
-            window_seconds=window_seconds,sample_hz=sample_hz)
+            window_seconds=window_seconds,sample_hz=sample_hz,
+            stride_seconds=stride_seconds,window_contract_version=window_contract_version)
         validate_runtime_input(self.policy, self.input_contract)
         configs, checkpoints = configs or {}, checkpoints or {}
         if (set(configs)|set(checkpoints))-set(names):
@@ -197,6 +200,10 @@ class OfficialWindowEngine:
         self.provenance.update(streaming_implementation_sha256=sha256(Path(__file__)),
             preprocessing_execution=dict(dlib_workers=8, dlib_instances='exclusive per call',
                 retina_priors='reference CPU tensors cached by complete shape/anchor settings; max 2 shapes'))
+        from collections import OrderedDict
+        self.prepared_cache = OrderedDict()
+        self.prepared_bytes = 0
+        self.prepared_lock = threading.Lock()
         self.scratch = self.output/'scratch'
         self.scratch.mkdir(exist_ok=True)
 
@@ -208,7 +215,8 @@ class OfficialWindowEngine:
         profile_results: dict[str, Any] = {p:dict(state='not_reached') for p in self.definitions}
         cache: dict[str, Any] = {}
         trace: list[dict] = []
-        used = sum(s['image'].nbytes for s in window['samples'])
+        reusable=window.get('window_contract_version')==2 and bool(window.get('source_id'))
+        used = sum(s['image'].nbytes for s in window['samples']) + (self.budget//4 if reusable else 0)
         if used > self.budget:
             raise ValueError('Active raw/crop cache budget exceeded')
         began = time.perf_counter()
@@ -227,16 +235,41 @@ class OfficialWindowEngine:
                 groups = []
                 detector = self.detectors[profile]
                 def detect(sample):
+                    key=(window.get('source_id'),profile,sample.get('frame_id',sample['frame_index']),
+                         sample.get('raw_pixels_sha256') or hashlib.sha256(sample['image'].tobytes()).hexdigest())
+                    with self.prepared_lock:
+                        cached=self.prepared_cache.get(key) if reusable else None
+                        if cached is not None:
+                            self.prepared_cache.move_to_end(key)
+                            return cached[0]
                     instance = self.dlib_detectors.get() if profile == 'dlib81' else detector
                     try:
                         faces = instance(sample['image'])
-                        return faces, getattr(instance, 'last_rejection_reason', 'no_valid_face')
+                        size=sum(crop.nbytes for crop,_ in faces)
+                        if reusable and size>self.budget//16:
+                            raise ValueError('Per-frame face geometry exceeds transient crop budget')
+                        # Own crop storage: a sliced view must not pin an entire
+                        # raw source frame outside the accounted crop ceiling.
+                        result=([(crop.copy(),metadata) for crop,metadata in faces],
+                                getattr(instance, 'last_rejection_reason', 'no_valid_face'))
+                        with self.prepared_lock:
+                            while self.prepared_cache and (self.prepared_bytes+size>self.budget//4 or len(self.prepared_cache)>=4096):
+                                _,(_,old_size)=self.prepared_cache.popitem(last=False)
+                                self.prepared_bytes-=old_size
+                            if reusable and size<=self.budget//4:
+                                # Retain only geometry output, keyed by exact source pixels/profile.
+                                self.prepared_cache[key]=(result,size)
+                                self.prepared_bytes+=size
+                        return result
                     finally:
                         if profile == 'dlib81':
                             self.dlib_detectors.put(instance)
 
-                detected = (self.face_pool.map(detect, window['samples']) if profile == 'dlib81'
-                            else map(detect, window['samples']))
+                def bounded_detection():
+                    for offset in range(0,len(window['samples']),8):
+                        batch=window['samples'][offset:offset+8]
+                        yield from (self.face_pool.map(detect,batch) if profile=='dlib81' else map(detect,batch))
+                detected = bounded_detection()
                 for sample, (faces, rejection_reason) in zip(window['samples'], detected):
                     image = sample['image']
                     paths = []
@@ -417,9 +450,9 @@ class VideoSource:
 class ModelWorker:
     def __init__(self, output, *, device, preprocessing_mode, face_model, profile_timeout,
                  cache_max_bytes, stop_event, policy=None, window_seconds=4., sample_hz=2.,
-                 configs=None, checkpoints=None, **kwargs):
+                 configs=None, checkpoints=None, stride_seconds=None, window_contract_version=1, **kwargs):
         self.peer = Peer('infer', (str(output), device, preprocessing_mode, str(face_model) if face_model else None,
-                         cache_max_bytes,policy,window_seconds,sample_hz,configs,checkpoints),
+                         cache_max_bytes,policy,window_seconds,sample_hz,configs,checkpoints,stride_seconds,window_contract_version),
                          profile_timeout, stop_event)
         self.provenance = self.peer.initial
         # A user stop must let an already-running inference finish.
@@ -435,20 +468,36 @@ class StreamingSession:
                  face_model=None, profile_timeout=180, cache_max_bytes=512*1024*1024,
                  progress=None, source_factory=VideoSource, worker_factory=ModelWorker,
                  window_seconds=4., sample_hz=2., original_filename=None, policy=None,policy_path=None,
-                 configs=None,checkpoints=None, **kwargs):
+                 configs=None,checkpoints=None, analysis_mode="stream",stride_seconds=None,
+                 event_source_factory=None, max_windows=10000,max_session_seconds=3600.,max_events=200000, **kwargs):
         if not math.isfinite(profile_timeout) or profile_timeout <= 0 or cache_max_bytes < 1 or \
                 not math.isfinite(window_seconds) or window_seconds <= 0 or not math.isfinite(sample_hz) or sample_hz <= 0:
             raise ValueError('Invalid streaming budget or cadence')
+        from .windowing import WindowTimeline
+        from .temporal import TemporalAggregator
+        if analysis_mode not in ('stream','offline_window'):
+            raise ValueError('Unsupported window analysis mode')
+        self.event_source_factory=event_source_factory
+        self.version=2 if event_source_factory or stride_seconds is not None or analysis_mode=='offline_window' else 1
+        self.stride_seconds=window_seconds if stride_seconds is None else stride_seconds
+        self.analysis_mode=analysis_mode
+        self.timeline_limits=dict(max_windows=max_windows,max_seconds=max_session_seconds,max_events=max_events)
+        WindowTimeline('validation','validation',window_seconds=window_seconds,stride_seconds=self.stride_seconds,
+                       sample_hz=sample_hz,cache_max_bytes=cache_max_bytes,**self.timeline_limits)
+        self.aggregate=TemporalAggregator()
         self.video, self.output = video, output
         from .policy import frozen_policy, execution_contract, validate_runtime_input
         selected, policy_hash = frozen_policy(policy,path=policy_path)
         actual = execution_contract([s['detector'] for s in selected['stages']],unit='window',mode=preprocessing_mode,
-                                    window_seconds=window_seconds,sample_hz=sample_hz)
+                                    window_seconds=window_seconds,sample_hz=sample_hz,
+                                    stride_seconds=self.stride_seconds,window_contract_version=self.version)
         validate_runtime_input(selected,actual)
         self.settings = dict(device=device, preprocessing_mode=preprocessing_mode, face_model=face_model,
                              profile_timeout=profile_timeout, cache_max_bytes=cache_max_bytes,
                              policy=selected,window_seconds=window_seconds,sample_hz=sample_hz,
                              configs=configs,checkpoints=checkpoints)
+        if self.version==2:
+            self.settings.update(stride_seconds=self.stride_seconds,window_contract_version=2)
         self.progress = progress or (lambda phase, message: None)
         self.source_factory, self.worker_factory = source_factory, worker_factory
         self.window_seconds, self.sample_hz = window_seconds, sample_hz
@@ -460,12 +509,13 @@ class StreamingSession:
         self.input_done = False
         self.failure: Exception | None = None
         self.started = 0.
-        self.report: dict[str, Any] = dict(schema_version=3, analysis_mode='stream', phase='starting',
+        self.report: dict[str, Any] = dict(schema_version=4, window_contract_version=self.version, analysis_mode=analysis_mode, phase='starting',
+            session_id=uuid.uuid4().hex,source_id=None,observed_horizon_seconds=0.,
             policy=selected,policy_sha256=policy_hash,input_contract=actual,
             original_filename=original_filename or video.name, ground_truth=None, deployment_ready=False,
             calibration_status='not_calibrated_for_profile', windows=self.rows,
-            window_seconds=window_seconds, sample_hz=sample_hz, stride_seconds=window_seconds,
-            sampling='paced_media_time_no_future_frames', preprocessing_mode=preprocessing_mode,
+            window_seconds=window_seconds, sample_hz=sample_hz, stride_seconds=self.stride_seconds,
+            sampling=actual['sampling'], preprocessing_mode=preprocessing_mode,
             metrics={k:None for k in ('acc','fnr','fpr','tp','fn','fp','tn')},
             resource_budget=dict(active_cache_bytes=cache_max_bytes, native_call_timeout_seconds=profile_timeout,
                 persisted_artifacts='metadata_only; source upload retained; raw/crop scratch reclaimed per window'),
@@ -479,6 +529,13 @@ class StreamingSession:
 
     def _save(self):
         """Called under the condition lock; artifacts precede observable status."""
+        from .temporal import TERMINAL
+        for row in self.rows:
+            self.aggregate.update(row)
+        phase=self.report['phase']
+        reason={'complete':'eof','stopped':'user_stop','failed':'failure'}.get(phase)
+        self.report['aggregate']=self.aggregate.snapshot(self.report['observed_horizon_seconds'],
+            pending=sum(r['outcome'] not in TERMINAL for r in self.rows),finalization_reason=reason)
         save_report(self.output, self.report)
 
     def _phase(self, phase, message):
@@ -489,8 +546,10 @@ class StreamingSession:
         self.progress(phase, message)
 
     def _wait_media(self, seconds):
-        remaining = self.started+seconds-time.monotonic()
-        if remaining > 0:
+        while not self.stop_event.is_set():
+            remaining = self.started+seconds-time.monotonic()
+            if remaining <= 0:
+                break
             self.stop_event.wait(remaining)
         if self.stop_event.is_set():
             raise StreamStopped()
@@ -529,24 +588,164 @@ class StreamingSession:
             try:
                 result = worker.infer(window)
                 with self.condition:
+                    if result.get('outcome') not in ('decided','unable_to_decide'):
+                        raise ValueError('Window executor returned an invalid disposition')
+                    for key in ('window_id','source_id','session_id','index','window_contract_version',
+                                'start_seconds','end_seconds','observed_end_seconds','policy_sha256','input_contract'):
+                        if key in result and result[key]!=row.get(key):
+                            raise ValueError('Window executor changed immutable '+key)
+                    # Validate terminal evidence before merging. Once accepted,
+                    # persistence errors fail the session, not the classifier's
+                    # already finalized decision.
+                    self.aggregate.update(dict(row,**result))
                     row.update(result)
                     # Persistence is part of latency. First save makes result readable;
                     # second persists the measured availability timestamp itself.
                     self._save()
                     elapsed = time.monotonic()-self.started
+                    origin=(window.get('ready_elapsed_seconds',elapsed) if self.analysis_mode=='offline_window'
+                            else row['end_seconds'])
                     row.update(result_available_elapsed_seconds=elapsed,
-                               latency_seconds=max(0., elapsed-row['end_seconds']))
+                               latency_seconds=max(0., elapsed-origin),
+                               latency_scope='since_window_admission' if self.analysis_mode=='offline_window' else 'since_media_window_end')
                     self._save()
             except Exception as error:
                 with self.condition:
-                    row.update(outcome='failed', reason=str(error), decision=None,
-                               evidence=getattr(error, 'streaming_evidence', {}))
+                    if row['outcome']=='processing':
+                        row.update(outcome='failed', reason=str(error), decision=None,
+                                   evidence=getattr(error, 'streaming_evidence', {}))
                     self.failure = error
                     self._save()
                     self.condition.notify_all()
                 return
 
+    def _run_events(self):
+        from .windowing import WindowTimeline, EventReader, mp4_events, window_record
+        self.output.mkdir(parents=True,exist_ok=False)
+        source=reader=worker=consumer=timeline=None
+        began=time.monotonic()
+        def submit(window, cancelled=False):
+            with self.condition:
+                window.update(policy_sha256=self.report['policy_sha256'],input_contract=self.report['input_contract'])
+                window['ready_elapsed_seconds']=time.monotonic()-self.started
+                row=window_record(window)
+                self.rows.append(row)
+                if cancelled:
+                    row.update(outcome='cancelled',reason='user_stop' if self.stop_event.is_set() else 'session_failed')
+                elif not window['samples']:
+                    row.update(outcome='unable_to_decide',reason='no_unique_source_samples')
+                else:
+                    if self.analysis_mode=='offline_window':
+                        # Backpressure: a fast source never replaces offline work.
+                        while self.pending is not None or any(r['outcome']=='processing' for r in self.rows):
+                            self.condition.wait(.01)
+                            if self.failure is not None:
+                                raise self.failure
+                            if self.stop_event.is_set():
+                                row.update(outcome='cancelled',reason='user_stop')
+                                raise StreamStopped()
+                    elif self.pending is not None:
+                        self.rows[self.pending['index']].update(outcome='skipped',reason='overload_replaced_by_newer_window')
+                    self.pending=window
+                    row['outcome']='waiting'
+                self._save()
+                self.condition.notify_all()
+        try:
+            self._phase('starting','驗證來源、凍結 Window Policy 與載入模型')
+            if self.event_source_factory is None:
+                if self.video.suffix.lower()!='.mp4' or not self.video.is_file() or not 0<self.video.stat().st_size<=VideoLimits().max_bytes:
+                    raise ValueError('Invalid MP4 input or size')
+                self.report['input_sha256']=sha256(self.video)
+                source=self.source_factory(self.video,stop_event=self.stop_event)
+                source_id=self.report['input_sha256']
+            else:
+                source=self.event_source_factory(self.video,stop_event=self.stop_event)
+                source_id=source.info.get('source_id',self.report['session_id'])
+                reader=EventReader(source,self.stop_event,self.settings['profile_timeout'])
+            if not isinstance(source_id,str) or not 0<len(source_id)<=256:
+                raise ValueError('Invalid source identity')
+            self.report.update(source=dict(source.info),source_id=source_id)
+            # Disjoint ceilings cover timeline, producer batch, waiting/running
+            # raw samples, plus worker raw/crops. Image references are shared
+            # within the producer; the native worker's transport is a copy.
+            budget=self.settings['cache_max_bytes']//4
+            if budget<1:
+                raise ValueError('Active cache budget too small')
+            timeline=WindowTimeline(source_id,self.report['session_id'],window_seconds=self.window_seconds,
+                stride_seconds=self.stride_seconds,sample_hz=self.sample_hz,cache_max_bytes=budget,**self.timeline_limits)
+            self.report['resource_budget'].update(timeline_raw_bytes=budget,inference_cache_bytes=budget,
+                max_windows=timeline.max_windows,max_session_seconds=timeline.max_seconds,max_events=timeline.max_events,
+                source_diagnostics=1000,max_active_windows=128,reader_threads=1,
+                reader_timeout_policy='quarantine noncooperative source until it returns')
+            worker=self.worker_factory(self.output,stop_event=self.stop_event,**dict(self.settings,cache_max_bytes=budget))
+            self.report.update(provenance=worker.provenance,startup_seconds=time.monotonic()-began)
+            atomic_json(self.output/'manifest.json',{k:v for k,v in self.report.items() if k!='windows'})
+            self.started=time.monotonic()
+            self.report['playback_started_unix_seconds']=time.time()
+            self._phase('playing','Offline Window 分析' if self.analysis_mode=='offline_window' else '原速 Window 串流')
+            consumer=threading.Thread(target=self._consume,args=(worker,),daemon=True)
+            consumer.start()
+            events=mp4_events(source,self.sample_hz) if reader is None else None
+            while True:
+                if self.stop_event.is_set():
+                    raise StreamStopped()
+                if self.failure is not None:
+                    raise self.failure
+                event=reader.read() if reader else next(events)
+                seconds=event.get('sampling_tick_seconds',event.get('timestamp_seconds',event.get('seconds',timeline.watermark)))
+                if (isinstance(seconds,bool) or not isinstance(seconds,(int,float)) or not math.isfinite(seconds) or
+                        seconds<0 or seconds>timeline.max_seconds):
+                    raise ValueError('Source duration budget exceeded or invalid event time')
+                if self.analysis_mode=='stream':
+                    self._wait_media(seconds)
+                windows=timeline.accept(event)
+                with self.condition:
+                    self.report['observed_horizon_seconds']=timeline.watermark
+                    self.report['media_seconds']=timeline.watermark
+                    self.report['source_events']=timeline.events
+                    self.report['source_diagnostics']=list(timeline.diagnostics)
+                for window in windows:
+                    submit(window)
+                with self.condition:
+                    self._save()
+                if event['type']=='end':
+                    break
+            self._phase('draining','來源已結束，等待保留的窗完成')
+        except StreamStopped:
+            self._phase('stopping','停止接收影格，完成正在推論的窗')
+        except Exception as error:
+            self.failure=error
+        finally:
+            if timeline is not None:
+                self.report['source_diagnostics']=list(timeline.diagnostics)
+                # Only committed observation time contributes to stop/failure tails.
+                if not timeline.closed and timeline.watermark>0:
+                    try:
+                        for window in timeline.accept(dict(type='end',seconds=timeline.watermark)):
+                            submit(window,cancelled=True)
+                    except Exception as error:
+                        if self.failure is None:self.failure=error
+            with self.condition:
+                self.input_done=True
+                if self.stop_event.is_set() or self.failure:
+                    for row in self.rows:
+                        if row['outcome'] in ('collecting','waiting'):
+                            row.update(outcome='cancelled',reason='user_stop' if self.stop_event.is_set() else 'session_failed')
+                    self.pending=None
+                self.condition.notify_all()
+            if consumer is not None:consumer.join()
+            if worker is not None:worker.close()
+            if reader is not None:reader.close()
+            elif source is not None:source.close()
+        phase='failed' if self.failure else 'stopped' if self.stop_event.is_set() else 'complete'
+        self.report['total_seconds']=time.monotonic()-began
+        if self.failure:atomic_json(self.output/'error.json',dict(error=str(self.failure)))
+        self._phase(phase,str(self.failure) if self.failure else 'Window 分析完成')
+        return self.report
+
     def run(self):
+        if self.version==2:
+            return self._run_events()
         self.output.mkdir(parents=True, exist_ok=False)
         source = worker = None
         consumer = None
@@ -556,6 +755,7 @@ class StreamingSession:
             if self.video.suffix.lower() != '.mp4' or not self.video.is_file() or not 0 < self.video.stat().st_size <= VideoLimits().max_bytes:
                 raise ValueError('Invalid MP4 input or size')
             self.report['input_sha256'] = sha256(self.video)
+            self.report['source_id']=self.report['input_sha256']
             source = self.source_factory(self.video, stop_event=self.stop_event)
             raw_reserve = 2*math.ceil(self.window_seconds*self.sample_hz)*source.info.get('width',0)*source.info.get('height',0)*3
             worker_settings = dict(self.settings, cache_max_bytes=self.settings['cache_max_bytes']-raw_reserve)
@@ -581,7 +781,13 @@ class StreamingSession:
                 window: dict[str, Any] = dict(index=i, start_seconds=start, end_seconds=end, samples=[])
                 with self.condition:
                     self.rows.append(dict(index=i, start_seconds=start, end_seconds=end,
-                                          outcome='collecting', decision=None, planned_samples=0))
+                        nominal_end_seconds=(i+1)*self.window_seconds,observed_end_seconds=start,
+                        window_contract_version=1,source_id=self.report['source_id'],session_id=self.report['session_id'],
+                        window_id=f"{self.report['session_id']}:{i}",source_frames=[],tail=end<(i+1)*self.window_seconds,
+                        outcome='collecting', decision=None, planned_samples=0))
+                    window.update({k:v for k,v in self.rows[i].items() if k not in ('source_frames','outcome','decision','planned_samples')})
+                    window.update(policy_sha256=self.report['policy_sha256'],input_contract=self.report['input_contract'])
+                    self.rows[i].update(policy_sha256=self.report['policy_sha256'],input_contract=self.report['input_contract'])
                     self.collecting = window
                 for j in range(int(math.ceil((end-start)*self.sample_hz-1e-10))):
                     timestamp = start+j/self.sample_hz
@@ -593,11 +799,22 @@ class StreamingSession:
                     previous_index = index
                     window['samples'].append(dict(frame_index=index, timestamp_seconds=index/source.info['fps'], image=image))
                     with self.condition:
+                        self.rows[i]['source_frames'].append(dict(frame_id=str(index),frame_index=index,
+                            timestamp_seconds=index/source.info['fps'],sampling_tick_seconds=timestamp,
+                            timestamp_basis='frame_index_over_fps',raw_pixels_sha256=hashlib.sha256(image.tobytes()).hexdigest()))
+                        self.report['observed_horizon_seconds']=timestamp
+                        self.rows[i]['observed_end_seconds']=timestamp
+                        window['samples'][-1].update(self.rows[i]['source_frames'][-1])
+                        window['observed_end_seconds']=timestamp
+                    with self.condition:
                         self.rows[i]['planned_samples'] = len(window['samples'])
                     if sum(s['image'].nbytes for s in window['samples']) > self.settings['cache_max_bytes']:
                         raise ValueError('Collecting window exceeds active raw cache budget')
                 self._wait_media(end)
                 with self.condition:
+                    self.report['observed_horizon_seconds']=end
+                    self.rows[i]['observed_end_seconds']=end
+                    window['observed_end_seconds']=end
                     row = self.rows[i]
                     row['planned_samples'] = len(window['samples'])
                     self.collecting = None

@@ -40,3 +40,110 @@ The job/manifest/report retains policy content, canonical hash and actual model
 order. Only active detectors are initialized; declared cadence/profile/asset
 mismatches fail before classifier loading. Defaults remain exploratory. See
 [SCORE_ARTIFACT.md](SCORE_ARTIFACT.md) for complete-score export and asset maps.
+
+## Phase 3: Offline Window, ongoing sources and temporal evidence
+
+The original `offline` whole-video sparse mode remains unchanged. Choose
+`offline_window` for every window without playback pacing or overload replacement.
+`stream` still has one running and one waiting window; newer work replaces only
+the waiting window. Both use the resident `OfficialWindowEngine` and frozen policy.
+The HTTP capability is now API v3; window reports are schema v4.
+
+In the UI choose Window duration, stride and Hz. The default stream keeps the
+legacy 4/4-second, 2-Hz sampling contract. Choose **共用滑窗取樣** to use the new
+domain even at those defaults. Offline Window always uses the new domain.
+Changing any cadence setting also selects the new domain; a bound legacy policy
+is rejected. Register a compatible policy with `--stream-policy NAME=JSON`.
+Unbound built-in policies remain exploratory and uncalibrated.
+
+For example, upload a local MP4 using the existing `/api/jobs` endpoint with:
+
+```text
+?filename=sample.mp4&analysis_mode=offline_window&policy=early&exploratory=true&window_seconds=4&stride_seconds=2&sample_hz=2
+```
+
+The new input domain is `window_contract_version=2`,
+`sampling=admitted_tick_grid_v2`. Ticks are anchored at media time zero; committed
+progress selects the newest admitted frame at/before each tick. A frame identity
+is selected once globally, then shared across windows by reference. MP4 uses the
+existing floor(tick × FPS) selection and explicitly declares
+`timestamp_basis=frame_index_over_fps`; this is not original PTS. The default 4/4,
+2-Hz MP4 frame selection remains reproducible. Non-integral cadence may differ
+from legacy per-window anchors and must be treated as a different policy domain.
+
+`windowing.WindowInput` / `WindowResult` carry source/session/window identities,
+nominal and observed bounds, tail, sample ticks, source timestamps, pixel hashes,
+profile coverage, disposition and policy binding. Pixels stay in bounded working
+storage, never in reports. Equivalent v2 profile geometry is cached by exact
+source/frame/pixels/profile; different profiles keep separate transforms/tensors.
+Legacy/unversioned direct engine calls do not reuse across-window geometry.
+
+For a library integration, pass `event_source_factory` to `StreamingSession`.
+Its instance exposes optional `info` metadata, `read_event(timeout=..., stop_event=...)`
+and `close()`. The factory and metadata setup must return promptly. No camera or
+RTSP production endpoint is provided. Supported event dictionaries:
+
+```python
+dict(type='frame', frame_id='source-frame-17', frame_index=17,
+     timestamp_seconds=8.5, timestamp_basis='source_pts', image=bgr_uint8_hwc)
+dict(type='progress', seconds=9.0)  # commits samples strictly before this watermark
+dict(type='end', seconds=9.3)       # EOF; emits observed short tails
+dict(type='error', message='source disconnected')
+```
+
+Duration, total frame count and file hash are optional for this source. Source
+IDs are explicit (or a session-local fallback); the system never invents a file
+hash. Sources must not mutate admitted image storage. Identical identity/content
+replay is deduplicated; conflicting content fails the session. Frames older than
+the committed watermark are rejected and logged, never inserted into closed windows.
+Frame indices, when supplied, must be unique to their source identity. A missing
+timestamp basis, regressing watermark or future frame is refused.
+
+Reads have bounded waits and cancellation. Native MP4/model calls remain in
+killable processes. Injected Python reads use one bounded reader thread: a source
+that ignores cancellation is quarantined, and replacement readers are refused
+until it returns. It cannot leak one new thread for every timeout. Reader factory
+construction itself is the integrator's cooperative responsibility.
+
+Defaults: at most 128 overlapping active windows, 10,000 windows, 3,600 media
+seconds, 200,000 source events/ticks/persisted sample memberships and 1,000 source
+diagnostics. MP4's existing 1,200-second/size/pixel limits still apply. Exceeding a
+limit fails explicitly. The logical raw/crop cache budget is split into timeline
+and worker ceilings; model memory, native decoder storage and IPC/runtime copies
+are additional. Face work is submitted in batches of eight; each v2 frame's crop
+geometry is capped at 1/16 of the worker budget, and the reusable geometry cache
+at 1/4 (4,096 entries). These are finite ceilings, not a total process RSS promise.
+
+`TemporalAggregator` emits `temporal_evidence_v1` independently of Cascade routing:
+
+- Any valid FAKE window: `FAKE_EVIDENCE`, retaining its source intervals.
+- Only REAL observations, with no unknown dispositions or uncovered observed time:
+  `REAL_EVIDENCE_ONLY`. An open source is explicitly provisional.
+- Otherwise: `INSUFFICIENT_EVIDENCE`; failure cannot certify REAL-only evidence.
+
+There is no session confidence, averaged exit score or calibrated session FAR.
+Decided seconds use interval union. Profile/frame coverage, unknown dispositions,
+conflicting REAL/FAKE intervals and uncovered time remain separate. Overlap cannot
+erase a skipped/cancelled/failed window. Replayed immutable results are idempotent;
+conflicting results are rejected. EOF, user stop and failure finalize separately.
+Stop drains in-flight inference and cancels waiting/unfinished observations without
+extending coverage into future media time. Offline latency is measured from window
+admission; streaming latency remains from media-window end.
+
+API polling, JSON download and restarted history use the stored rule/result.
+Completed histories are not recomputed; histories without an aggregate show
+unavailable. An interrupted schema-v4/v1-rule report is explicitly finalized as
+failure at restart. Download `report.json` for complete frame/profile evidence.
+
+For complete score export use the same domain explicitly:
+
+```text
+python -B -m cascade.export_scores --cohort cohort.json --output scores-new --mode official --unit window --window-contract-version 2 --window-seconds 4 --stride-seconds 2 --sample-hz 2
+```
+
+The analysis loader checks complete window/sample/model coverage and shared frame
+hashes. Policy search still requires grouped calibration/evaluation roles and
+explicit window labels or a declared `all_windows` truth scope. No source-level
+label is implicitly copied to its windows, and overlap is not independent data.
+Emitted policies remain pending independent review. Real connectors, v2 GPU
+throughput and scientific quality are UNVERIFIED by the lightweight fixture suite.

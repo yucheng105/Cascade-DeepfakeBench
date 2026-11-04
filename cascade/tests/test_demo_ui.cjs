@@ -96,3 +96,23 @@ test('streaming renders the selected policy subset and exposes its identity',()=
   assert.doesNotMatch(p.el('cascade-path').textContent,/Xception|SBI/);
   assert.match(p.el('stream-summary').textContent,/ucf-only/);
 });
+
+
+test('Offline Window selects window policies and shows stored evidence scope',()=>{
+  const p=page();p.el('analysis-mode').value='offline_window';p.el('analysis-mode').onchange();
+  assert.equal(p.el('cadence-controls').hidden,false);
+  assert.equal(p.el('mode-label').textContent,'離線 Window');
+  assert.equal(p.el('policy').children.length,1);
+  p.ctx.job=structuredClone(windowJob);
+  p.ctx.job.analysis_mode='offline_window';
+  p.ctx.job.report.aggregate={rule_version:'temporal_evidence_v1',state:'FAKE_EVIDENCE',provisional:false,
+    finalization_reason:'eof',observed_horizon_seconds:4,decided_seconds:4,gap_intervals:[],
+    unknown_windows:[],valid_profile_frames:{dlib81:8}};
+  p.run('showStream(job)');
+  assert.match(p.el('aggregate-summary').textContent,/FAKE_EVIDENCE/);
+  assert.match(p.el('aggregate-summary').textContent,/temporal_evidence_v1/);
+  assert.match(p.el('aggregate-summary').textContent,/已結束觀察/);
+  assert.match(p.el('aggregate-summary').textContent,/聯集 4 s/);
+  delete p.ctx.job.report.aggregate;p.run('showStream(job)');
+  assert.match(p.el('aggregate-summary').textContent,/未提供/);
+});

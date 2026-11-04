@@ -65,7 +65,7 @@ class DemoState:
                 job = json.loads(path.read_text(encoding='utf-8'))
                 job.update(id=path.parent.name, phase='failed', message='先前工作已中斷，請重新上傳')
                 result = path.parent/'result'
-                if job.get('analysis_mode') == 'stream' and (result/'report.json').is_file():
+                if job.get('analysis_mode') in ('stream','offline_window') and (result/'report.json').is_file():
                     report = json.loads((result/'report.json').read_text(encoding='utf-8'))
                     phase = report.get('phase')
                     if phase not in ('complete', 'stopped', 'failed'):
@@ -74,6 +74,13 @@ class DemoState:
                         for row in report.get('windows', []):
                             if row['outcome'] in ('collecting', 'waiting', 'processing'):
                                 row.update(outcome='cancelled', reason='service_interrupted', decision=None)
+                        # Finalize only an interrupted report that declared this
+                        # exact rule. Completed/legacy histories are read verbatim.
+                        if report.get('schema_version')==4 and report.get('aggregate',{}).get('rule_version')=='temporal_evidence_v1':
+                            from .temporal import TemporalAggregator
+                            aggregate=TemporalAggregator()
+                            for row in report['windows']:aggregate.update(row)
+                            report['aggregate']=aggregate.snapshot(report.get('observed_horizon_seconds',0.),finalization_reason='failure')
                         from .preprocessing import atomic_json
                         save_report(result, report)
                         atomic_json(result/'status.json', dict(phase='failed', message=report['message']))
@@ -88,20 +95,21 @@ class DemoState:
             except (OSError, ValueError, KeyError):
                 continue
 
-    def reserve(self, filename, policy, preprocessing_mode=None, analysis_mode='offline'):
+    def reserve(self, filename, policy, preprocessing_mode=None, analysis_mode='offline',cadence=None):
         with self.lock:
             if self.active is not None:
                 raise RuntimeError('已有影片正在處理，請等待完成後再上傳')
             selected = None
-            if analysis_mode=='stream':
+            if analysis_mode in ('stream','offline_window'):
                 selected,policy_hash=frozen_policy(self.stream_policies[policy])
                 validate_runtime_input(selected,execution_contract([s['detector'] for s in selected['stages']],
-                    unit='window',mode=preprocessing_mode or self.preprocessing_mode))
+                    unit='window',mode=preprocessing_mode or self.preprocessing_mode,**(cadence or {})))
             job_id = uuid.uuid4().hex
             folder = self.root/job_id
             folder.mkdir(exist_ok=False)
             job = dict(id=job_id, filename=filename, policy=policy, preprocessing_mode=preprocessing_mode or self.preprocessing_mode, phase='uploading', message='接收影片')
             job['analysis_mode'] = analysis_mode
+            job['cadence'] = cadence or {}
             if selected is not None:
                 job.update(stream_policy=selected,policy_sha256=policy_hash,policy_id=selected['policy_id'])
             write_json(folder/'job.json', job)
@@ -122,7 +130,7 @@ class DemoState:
     def snapshot(self, job_id):
         with self.lock:
             job=dict(self.jobs[job_id])
-            if job.get('analysis_mode') == 'stream' and (self.root/job_id/'result/report.json').is_file():
+            if job.get('analysis_mode') in ('stream','offline_window') and (self.root/job_id/'result/report.json').is_file():
                 report = read_json(self.root/job_id/'result/report.json')
                 # Polling needs counts and traces; full per-frame geometry stays
                 # in the downloadable report, avoiding quadratic UI traffic.
@@ -137,9 +145,10 @@ class DemoState:
         def work():
             job = self.snapshot(job_id)
             try:
-                if job.get('analysis_mode') == 'stream':
+                if job.get('analysis_mode') in ('stream','offline_window'):
                     session = self.stream_factory(self.root/job_id/'input.mp4', self.root/job_id/'result',
                         policy=job['stream_policy'],
+                        **({**{k:v for k,v in job.get('cadence',{}).items() if k!='window_contract_version'}, 'analysis_mode':job['analysis_mode']} if job.get('cadence') or job['analysis_mode']=='offline_window' else {}),
                         device=self.device, face_model=self.face_model,
                         preprocessing_mode=job['preprocessing_mode'], profile_timeout=self.profile_timeout,
                         cache_max_bytes=self.cache_max_bytes, original_filename=job['filename'],
@@ -304,7 +313,7 @@ def make_server(root: Path, *, port=8765, device='cuda', face_model: Path = MODE
                 self.send_header('Content-Length', '0')
                 self.end_headers()
             elif path == '/api/config':
-                self.send_json(dict(api_version=2, analysis_modes=['offline','stream'],
+                self.send_json(dict(api_version=3, window_contract_versions=[1,2], temporal_rules=['temporal_evidence_v1'], analysis_modes=['offline','stream','offline_window'],
                                     stream_policies=[dict(name=n,policy_id=p['policy_id'],
                                         order=[s['detector'] for s in p['stages']]) for n,p in state.stream_policies.items()],
                                     server_pid=os.getpid(), server_started=state.server_started,
@@ -352,14 +361,22 @@ def make_server(root: Path, *, port=8765, device='cuda', face_model: Path = MODE
                 length = int(self.headers.get('Content-Length', '0'))
             except ValueError:
                 length = 0
-            catalog = state.stream_policies if analysis_mode=='stream' else POLICIES
+            catalog = state.stream_policies if analysis_mode in ('stream','offline_window') else POLICIES
             if not filename.lower().endswith('.mp4') or len(filename) > 180 or policy not in catalog or mode not in ('official','legacy') or \
-                    analysis_mode not in ('offline','stream') or \
+                    analysis_mode not in ('offline','stream','offline_window') or \
                     query.get('exploratory') != ['true'] or not 0 < length <= VideoLimits().max_bytes:
                 self.send_json(dict(error='需有效 MP4、大小 ≤200 MiB，並確認探索模式'), 400)
                 return
             try:
-                job_id = state.reserve(filename, policy,mode,analysis_mode)
+                cadence={}
+                if analysis_mode=='offline_window' or any(k in query for k in ('window_seconds','stride_seconds','sample_hz')):
+                    cadence=dict(window_seconds=float(query.get('window_seconds',['4'])[0]),
+                        stride_seconds=float(query.get('stride_seconds',query.get('window_seconds',['4']))[0]),
+                        sample_hz=float(query.get('sample_hz',['2'])[0]),window_contract_version=2)
+                    from .windowing import WindowTimeline
+                    WindowTimeline('validate','validate',**{k:v for k,v in cadence.items() if k!='window_contract_version'})
+                    if analysis_mode=='offline':raise ValueError('Cadence requires a Window mode')
+                job_id = state.reserve(filename, policy,mode,analysis_mode,cadence)
             except RuntimeError as error:
                 self.send_json(dict(error=str(error)), 409)
                 return
@@ -377,7 +394,7 @@ def make_server(root: Path, *, port=8765, device='cuda', face_model: Path = MODE
                         stream.write(block)
                         remaining -= len(block)
                 state.update(job_id, 'queued', '準備影片處理')
-                self.send_json(dict(id=job_id, analysis_mode=analysis_mode, api_version=2), 202)
+                self.send_json(dict(id=job_id, analysis_mode=analysis_mode, api_version=3), 202)
                 state.start(job_id)
             except (OSError, ValueError) as error:
                 state.fail(job_id, str(error))

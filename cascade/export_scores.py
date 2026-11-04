@@ -53,7 +53,7 @@ def timing_costs(timing):
 
 def export_cohort(spec: dict, output: Path, *, mode='crops', unit='video', device='cpu',
                   detectors=DETECTORS, max_frames=32, configs=None, checkpoints=None,
-                  window_seconds=4., sample_hz=2., face_model=None) -> dict:
+                  window_seconds=4., sample_hz=2., face_model=None, stride_seconds=None, window_contract_version=1) -> dict:
     import torch
     rows=_records(spec)
     names=list(detectors)
@@ -64,7 +64,8 @@ def export_cohort(spec: dict, output: Path, *, mode='crops', unit='video', devic
     if mode!='crops' and spec['dataset_id']!='uploaded_video':
         raise ValueError('Raw MP4 execution domain is uploaded_video; source dataset belongs in lineage')
     actual=execution_contract(names,unit=unit,mode=mode,max_frames=max_frames,
-                              window_seconds=window_seconds,sample_hz=sample_hz)
+                              window_seconds=window_seconds,sample_hz=sample_hz,
+                              stride_seconds=stride_seconds,window_contract_version=window_contract_version)
     configs,checkpoints=configs or {},checkpoints or {}
     if (set(configs)|set(checkpoints))-set(names):raise ValueError('Unused detector override')
     if output.exists():raise ValueError('Output exists; choose a new artifact directory')
@@ -79,28 +80,39 @@ def export_cohort(spec: dict, output: Path, *, mode='crops', unit='video', devic
         p['stages']=[dict(detector=n,low=0.,high=1.) for n in names]
         p['stages'][-1].update(low=.5,high=.5)
         engine=OfficialWindowEngine(output,device,mode,face_model,512*1024*1024,policy=p,
-            window_seconds=window_seconds,sample_hz=sample_hz,configs=configs,checkpoints=checkpoints)
+            window_seconds=window_seconds,sample_hz=sample_hz,configs=configs,checkpoints=checkpoints,
+            stride_seconds=stride_seconds,window_contract_version=window_contract_version)
         try:
             models=engine.provenance['models']
             for record in rows:
                 source=VideoSource(Path(record['video']),stop_event=threading.Event())
                 source_hash=sha256(Path(record['video']))
                 try:
-                    previous=-1
-                    for i in range(math.ceil(source.info['duration_seconds']/window_seconds-1e-10)):
-                        start=i*window_seconds;end=min(start+window_seconds,source.info['duration_seconds'])
-                        admitted=[]
-                        for j in range(math.ceil((end-start)*sample_hz-1e-10)):
-                            index=min(int((start+j/sample_hz)*source.info['fps']),source.info['frame_count']-1)
-                            if index==previous:continue
-                            previous=index
-                            admitted.append(dict(frame_index=index,timestamp_seconds=index/source.info['fps'],image=source.read(index)))
+                    from .windowing import WindowTimeline, mp4_events, frame_evidence
+                    def legacy_windows():
+                        previous=-1
+                        for i in range(math.ceil(source.info['duration_seconds']/window_seconds-1e-10)):
+                            start=i*window_seconds;end=min(start+window_seconds,source.info['duration_seconds'])
+                            admitted=[]
+                            for j in range(math.ceil((end-start)*sample_hz-1e-10)):
+                                index=min(int((start+j/sample_hz)*source.info['fps']),source.info['frame_count']-1)
+                                if index==previous:continue
+                                previous=index
+                                admitted.append(dict(frame_index=index,timestamp_seconds=index/source.info['fps'],image=source.read(index)))
+                            yield dict(index=i,start_seconds=start,end_seconds=end,samples=admitted)
+                    def versioned_windows():
+                        timeline=WindowTimeline(record['source_id'],record['sample_id'],window_seconds=window_seconds,
+                            stride_seconds=actual['stride_seconds'],sample_hz=sample_hz)
+                        for event in mp4_events(source,sample_hz):
+                            yield from timeline.accept(event)
+                    for window in (versioned_windows() if window_contract_version==2 else legacy_windows()):
+                        i,start,end,admitted=(window[k] for k in ('index','start_seconds','end_seconds','samples'))
                         identity=record['sample_id']+':window:'+str(i)
                         sample={k:v for k,v in record.items() if k not in ('video','frames','window_labels')}
                         sample.update(source_label=record.get('label'),source_label_provenance=record['label_provenance'])
                         labels=record.get('window_labels',{})
                         if not isinstance(labels,dict):raise ValueError('window_labels must map window indices to ground truth')
-                        count=math.ceil(source.info['duration_seconds']/window_seconds-1e-10)
+                        count=math.ceil(source.info['duration_seconds']/actual['stride_seconds']-1e-10)
                         if any(not isinstance(k,str) or not k.isdigit() or str(int(k))!=k or not 0<=int(k)<count for k in labels):
                             raise ValueError('window_labels contains an unexpected window index')
                         if str(i) in labels:
@@ -118,8 +130,12 @@ def export_cohort(spec: dict, output: Path, *, mode='crops', unit='video', devic
                             source_metadata=source.info,
                             source_frames=[dict(frame_index=s['frame_index'],timestamp_seconds=s['timestamp_seconds'],
                                 raw_pixels_sha256=hashlib.sha256(s['image'].tobytes()).hexdigest()) for s in admitted])
+                        if window_contract_version==2:
+                            sample.update(window_contract_version=2,window_id=window['window_id'],
+                                observed_end_seconds=window['observed_end_seconds'],nominal_end_seconds=window['nominal_end_seconds'],
+                                source_frames=[frame_evidence(s) for s in admitted])
                         samples.append(sample)
-                        result=engine.infer(dict(index=i,samples=admitted),full_scores=True)
+                        result=engine.infer(window,full_scores=True)
                         for score in result['score_rows']:
                             timing=score.pop('timing'); name=score['detector']
                             timing['allocated_forward_ms']=timing.get('per_video_forward_ms',{}).get('window_'+str(i))
@@ -210,6 +226,10 @@ def main(argv=None):
     parser.add_argument('--checkpoint',action='append',default=[])
     parser.add_argument('--config',action='append',default=[])
     parser.add_argument('--max-frames',type=int,default=32)
+    parser.add_argument('--window-seconds',type=float,default=4.)
+    parser.add_argument('--sample-hz',type=float,default=2.)
+    parser.add_argument('--stride-seconds',type=float)
+    parser.add_argument('--window-contract-version',type=int,choices=(1,2),default=1)
     args=parser.parse_args(argv)
     spec=json.loads(args.cohort.read_text(encoding='utf-8-sig'))
     # Resolve the cohort's declared paths relative to the cohort, never the shell cwd.
@@ -220,7 +240,8 @@ def main(argv=None):
             else:row[key]=[str((args.cohort.parent/p).resolve()) for p in row[key]]
     result=export_cohort(spec,args.output,mode=args.mode,unit=args.unit,device=args.device,
         detectors=tuple(args.detectors.split(',')),configs=overrides(args.config),
-        checkpoints=overrides(args.checkpoint),max_frames=args.max_frames)
+        checkpoints=overrides(args.checkpoint),max_frames=args.max_frames,window_seconds=args.window_seconds,
+        sample_hz=args.sample_hz,stride_seconds=args.stride_seconds,window_contract_version=args.window_contract_version)
     print(json.dumps(result['coverage']))
 
 

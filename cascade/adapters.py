@@ -18,6 +18,8 @@ def bind_face_profile(adapter, definition: dict, *, cadence: dict | None = None)
     tensor['aggregation'] = 'max_face_then_mean_frame'
     if cadence is not None:
         tensor['cadence'] = {k:cadence[k] for k in ('window_seconds','stride_seconds','sample_hz')}
+        if cadence.get('window_contract_version') == 2:
+            tensor['cadence'].update(window_contract_version=2,sampling=cadence['sampling'])
     adapter.provenance['preprocessing_sha256'] = hashlib.sha256(json.dumps(
         dict(tensor=tensor,face_profile=definition),sort_keys=True).encode()).hexdigest()
 

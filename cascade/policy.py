@@ -15,7 +15,7 @@ AGGREGATIONS = ('mean_frame_probability', 'max_face_then_mean_frame')
 
 
 def execution_contract(names, *, unit='video', mode='official', max_frames=32,
-                       window_seconds=4., sample_hz=2.) -> dict:
+                       window_seconds=4., sample_hz=2., stride_seconds=None, window_contract_version=1) -> dict:
     profiles = {'xception':'dlib81','ucf':'dlib81','sbi':'retinaface'}
     value = dict(unit=unit, profiles={n:('preprocessed_face_crops' if mode=='crops' else
         profiles[n] if mode=='official' else 'yunet_legacy') for n in names},
@@ -25,6 +25,11 @@ def execution_contract(names, *, unit='video', mode='official', max_frames=32,
     else:
         value.update(sampling='paced_media_time_no_future_frames',window_seconds=window_seconds,
                      stride_seconds=window_seconds,sample_hz=sample_hz)
+    if unit == 'window' and window_contract_version == 2:
+        value.update(window_contract_version=2, sampling='admitted_tick_grid_v2',
+                     stride_seconds=window_seconds if stride_seconds is None else stride_seconds)
+    elif window_contract_version != 1 or (stride_seconds is not None and stride_seconds != window_seconds):
+        raise ValueError('New cadence requires window_contract_version=2')
     _validate_input_contract(value,list(names))
     return value
 
@@ -60,6 +65,11 @@ def _validate_input_contract(value, names: list[str]) -> None:
     common = {'unit', 'sampling', 'profiles', 'aggregation'}
     required = common | ({'max_frames'} if value['unit'] == 'video'
                          else {'window_seconds', 'stride_seconds', 'sample_hz'})
+    version=value.get('window_contract_version',1)
+    if 'window_contract_version' in value:
+        if value['unit']!='window' or type(version) is not int or version!=2:
+            raise ValueError('Unsupported window_contract_version')
+        required |= {'window_contract_version'}
     if set(value) != required:
         raise ValueError(f'{field} requires exactly {sorted(required)}')
     for key, allowed in (('profiles', FACE_PROFILES), ('aggregation', AGGREGATIONS)):
@@ -73,10 +83,12 @@ def _validate_input_contract(value, names: list[str]) -> None:
         if type(value['max_frames']) is not int or value['max_frames'] < 1:
             raise ValueError(f'{field}.max_frames must be a positive integer')
     else:
-        if value['sampling'] != 'paced_media_time_no_future_frames':
+        if value['sampling'] != ('admitted_tick_grid_v2' if version==2 else 'paced_media_time_no_future_frames'):
             raise ValueError(f'{field}.sampling is unsupported for window')
         for key in ('window_seconds', 'stride_seconds', 'sample_hz'):
             _finite_number(value[key], f'{field}.{key}')
+        if value['stride_seconds']>value['window_seconds']:
+            raise ValueError('stride_seconds exceeds window_seconds')
 
 
 def _validate_metadata(value: dict, names: list[str]) -> None:
