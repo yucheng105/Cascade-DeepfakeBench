@@ -26,6 +26,27 @@ unknown labels and FAR/FRR stay null. See workspace
 `docs/preprocessing_repair_acceptance.md` for the current parity evidence, and
 `docs/phase2_video_demo.md` for the historical YuNet demo record.
 
+### Research demonstration interface
+
+The light interface pairs the source video with the Xception → UCF → SBI
+decision path. Reached stages show their actual scores and thresholds;
+unexecuted stages remain explicitly marked. Preprocessing and policy controls
+are under advanced settings, while detailed traces and provenance are expandable.
+Offline results include captioned face samples and report downloads.
+
+Streaming windows can be selected to inspect their own traces. Selection does
+not interrupt active playback; after completion it also seeks to the window's
+start. Skipped, cancelled and unable-to-decide windows are never presented as
+REAL, and no whole-stream verdict is inferred. Fake scores are not accuracy or
+the probability of a correct decision. The interface uses local font fallbacks
+and requires no external asset service or frontend build.
+
+Frontend behavior regressions (requires Node.js, no packages to install):
+
+```powershell
+node --test cascade/tests/test_demo_ui.cjs
+```
+
 ## Phase 2: policy-driven offline runtime
 
 The new entry point is `python -m cascade.offline`; the existing `cascade/test.py`

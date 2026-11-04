@@ -2,61 +2,301 @@
 <html lang="zh-Hant">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>CASCAde · Video & Streaming Demo</title>
+<meta name="theme-color" content="#F3F6FA">
+<title>CASCAde · 影片鑑別研究室</title>
 <style>
-:root{color-scheme:dark;--bg:#0b111b;--card:#131e2d;--line:#28374a;--muted:#a1b1c5;--text:#eef4fa;--teal:#67e3cd;--amber:#f7cf80;--red:#ffa8a8}
-*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at top right,#123139 0,transparent 45%),var(--bg);font:15px/1.65 "Segoe UI","Microsoft JhengHei",sans-serif;color:var(--text)}
-main{max-width:1160px;margin:auto;padding:40px 28px 70px}header{display:flex;align-items:center;justify-content:space-between;gap:20px;border-bottom:1px solid var(--line);padding-bottom:25px;margin-bottom:28px}.brand{font-weight:800;font-size:28px;letter-spacing:1px}.brand span{color:var(--teal)}.eyebrow{color:var(--teal);font-size:12px;letter-spacing:2px;text-transform:uppercase}h1{font-size:30px;line-height:1.35;margin:7px 0 10px}h2{font-size:19px;margin:0 0 16px}p{margin:8px 0}.muted{color:var(--muted)}.badge{display:inline-block;padding:5px 12px;border:1px solid #527461;border-radius:30px;color:var(--teal);font-size:12px;white-space:nowrap}.intro{margin-bottom:24px;max-width:760px}.layout{display:grid;grid-template-columns:360px 1fr;gap:22px;align-items:start}.panel{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:25px;margin-bottom:22px}.drop{border:1px dashed #506478;border-radius:12px;padding:22px 18px;background:#0e1825;margin:16px 0}.drop input{max-width:100%;font:inherit;font-size:13px}.drop strong{display:block;margin-bottom:10px}label{display:block;margin:16px 0 7px}select,button{font:inherit;border-radius:9px;padding:10px 12px}select{width:100%;background:#0e1825;border:1px solid #435569;color:var(--text)}.check{display:flex;align-items:start;gap:9px;font-size:13px;color:var(--muted);margin:18px 0}.check input{margin-top:5px;accent-color:var(--teal)}button{cursor:pointer;border:0;background:var(--teal);color:#082522;font-weight:700;width:100%}button:disabled{opacity:.45;cursor:wait}button.secondary{background:transparent;border:1px solid var(--line);color:var(--text);text-align:left;margin-top:8px;font-size:12px}.note{color:var(--amber);font-size:12px}.status{padding:13px 15px;border-left:3px solid var(--teal);background:#0e1825;border-radius:6px;margin:15px 0;overflow-wrap:anywhere}.status.error{border-color:var(--red);color:var(--red)}.progress{height:5px;background:#263648;border-radius:20px;overflow:hidden;margin-top:10px}.progress i{display:block;background:var(--teal);height:100%;width:0;transition:width .4s}video{width:100%;max-height:340px;background:#080d14;border-radius:10px;margin:10px 0}video[hidden]{display:none}.result-head{display:flex;justify-content:space-between;align-items:start;gap:20px}.verdict{font-size:38px;font-weight:800;line-height:1.25}.verdict.real{color:var(--teal)}.verdict.fake{color:var(--red)}.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:20px 0}.stat{background:#0c1623;padding:13px;border-radius:10px}.stat small{display:block;color:var(--muted)}.stat strong{font-size:19px}table{width:100%;border-collapse:collapse;font-size:13px}th,td{text-align:left;border-bottom:1px solid var(--line);padding:11px 6px}th{color:var(--muted);font-weight:500}.table-wrap{overflow-x:auto}.pill{color:var(--teal);white-space:nowrap}.skipped{color:var(--muted)}.faces{display:grid;grid-template-columns:repeat(6,1fr);gap:7px;margin:12px 0}.faces img{width:100%;border-radius:7px;background:#0b111b}.downloads{display:flex;gap:10px;flex-wrap:wrap;margin-top:20px}.downloads a{color:var(--teal);text-decoration:none;padding:7px 12px;background:#0c1623;border:1px solid var(--line);border-radius:7px;font-size:13px}.empty{padding:40px 12px;text-align:center}.steps{display:flex;justify-content:center;gap:10px;flex-wrap:wrap;margin:20px 0;color:var(--teal);font-size:13px}.file-name{overflow-wrap:anywhere;font-size:13px;color:var(--muted)}details{margin-top:16px;color:var(--muted);font-size:12px}pre{white-space:pre-wrap;overflow-wrap:anywhere}.hidden,[hidden]{display:none!important}footer{font-size:12px;color:var(--muted);margin-top:14px}@media(max-width:860px){.layout{grid-template-columns:1fr}.faces{grid-template-columns:repeat(4,1fr)}main{padding:24px 16px}.stats{gap:7px}.panel{padding:19px}header{align-items:start}.badge{white-space:normal}}
+:root{color-scheme:light;--bg:#f3f6fa;--paper:#fff;--text:#172b46;--muted:#596b81;--line:#dce4ee;--blue:#245fd3;--blue-soft:#edf3ff;--amber:#95610b;--amber-soft:#fff6e5;--red:#c43d4b;--red-soft:#fff0f2;--radius:12px;font-family:"IBM Plex Sans","Noto Sans TC","Microsoft JhengHei",sans-serif;font-size:15px}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);line-height:1.65}
+button,input,select{font:inherit}
+button,summary,select{cursor:pointer}
+button,a,input,select,summary{touch-action:manipulation}
+button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visible{outline:3px solid var(--blue);outline-offset:4px}
+a{color:var(--blue);text-underline-offset:4px}
+button{border:0}
+button:disabled{cursor:not-allowed;opacity:.5}
+h1,h2,h3,p{margin:0}
+h1{font-size:clamp(27px,3vw,38px);line-height:1.35;font-weight:650;letter-spacing:-.035em}
+h2{font-size:18px;font-weight:650}
+h3{font-size:15px;font-weight:650}
+.muted{color:var(--muted)}
+.small{font-size:12px}
+.hidden,[hidden]{display:none!important}
+.shell{max-width:1380px;margin:auto;padding:0 40px}
+.topbar{background:var(--paper);border-bottom:1px solid var(--line)}
+header{display:flex;align-items:center;justify-content:space-between;min-height:80px;gap:20px}
+.identity{display:flex;align-items:center;gap:15px}
+.brand-mark{display:flex;align-items:center;gap:4px;width:34px;transform:rotate(-24deg)}
+.brand-mark i{width:8px;background:var(--blue);border-radius:2px;height:15px}
+.brand-mark i:nth-child(2){height:25px}
+.brand-mark i:last-child{height:34px}
+.brand{font-size:26px;font-weight:750;letter-spacing:-1px;line-height:1.2}
+.brand-caption{border-left:1px solid var(--line);padding-left:18px;color:var(--muted);font-size:13px}
+.header-actions{display:flex;align-items:center;gap:24px}
+.header-actions a{font-size:13px;text-decoration:none}
+.badge{font-size:12px;color:var(--muted);display:inline-flex;align-items:center;gap:8px}
+.badge:before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor;flex-shrink:0}
+main.shell{padding-bottom:44px}
+.intro{display:flex;justify-content:space-between;align-items:flex-end;gap:24px;padding:35px 0 25px}
+.intro p{color:var(--muted);margin-top:10px;max-width:65ch;font-size:14px}
+.intro-note{font-size:12px;color:var(--muted);white-space:nowrap;padding-bottom:3px}
+.panel{background:var(--paper);border:1px solid var(--line);border-radius:var(--radius)}
+.controls{padding:20px 24px;margin-bottom:24px}
+.control-row{display:grid;grid-template-columns:minmax(260px,1fr) minmax(230px,.66fr) auto;gap:24px;align-items:end}
+.field-label{display:block;font-size:12px;color:var(--muted);margin-bottom:7px}
+.file-picker{display:flex;align-items:center;gap:12px;min-width:0}
+.file-picker input{min-width:0;width:100%;font-size:12px;color:var(--muted)}
+input::file-selector-button{background:var(--blue-soft);color:var(--blue);border:1px solid #c8d8f5;border-radius:7px;font:inherit;font-size:13px;font-weight:600;padding:10px 14px;margin-right:12px;cursor:pointer}
+select{width:100%;min-height:42px;padding:8px 32px 8px 12px;background:var(--paper);border:1px solid #b8c6d8;border-radius:7px;color:var(--text);font-size:13px}
+.primary{min-height:44px;background:var(--blue);color:white;padding:10px 27px;border-radius:7px;font-size:14px;font-weight:600}
+.secondary{background:var(--paper);border:1px solid var(--line);color:var(--text);border-radius:7px;padding:9px 12px;font-size:13px}
+.primary:hover:not(:disabled){background:#1b4fae}
+.secondary:hover:not(:disabled){background:var(--blue-soft)}
+.control-foot{display:flex;align-items:center;justify-content:space-between;gap:20px;margin-top:14px}
+.check{display:flex;gap:8px;align-items:flex-start;color:var(--muted);font-size:12px}
+.check input{accent-color:var(--blue);width:15px;height:15px;margin:3px 0 0;flex-shrink:0}
+.limits{font-size:11px;color:var(--muted);margin-top:7px}
+.advanced{margin-top:14px;border-top:1px solid var(--line);padding-top:10px;font-size:13px}
+.advanced summary{width:fit-content;color:var(--muted)}
+.advanced-grid{display:grid;grid-template-columns:1fr 1fr;gap:22px;padding:16px 0}
+.advanced-grid label{display:block;font-size:13px;margin-bottom:7px}
+.note{color:var(--amber);font-size:12px;line-height:1.7}
+.advanced .note{margin-top:8px}
+.method-note{font-size:12px;color:var(--muted);max-width:85ch;margin-top:12px}
+.workspace{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(340px,1fr);gap:0;overflow:hidden}
+.media-panel{padding:24px;border-right:1px solid var(--line);min-width:0;display:flex;flex-direction:column}
+.section-head{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:16px}
+.section-head span{font-size:12px;color:var(--muted)}
+.file-name{font-size:12px;color:var(--muted);overflow-wrap:anywhere}
+.screen{background:#eaf0f7;position:relative;aspect-ratio:16/9;border:1px solid var(--line);border-radius:7px;display:flex;align-items:center;justify-content:center;overflow:hidden}
+video{display:block;width:100%;height:100%;max-height:430px;object-fit:contain;background:#101c2d}
+.empty{text-align:center;padding:24px;color:var(--muted)}
+.empty p{font-size:14px;color:var(--text);margin:17px 0 5px}
+.empty small{font-size:12px}
+.film-icon{width:76px;height:54px;margin:auto;border:2px solid #a9bbd3;border-radius:7px;position:relative}
+.film-icon:before{content:"";position:absolute;left:31px;top:15px;border-left:16px solid #7d98bc;border-top:10px solid transparent;border-bottom:10px solid transparent}
+.film-icon:after{content:"";position:absolute;inset:5px;border-top:3px dotted #a9bbd3;border-bottom:3px dotted #a9bbd3}
+.media-meta{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-top:12px}
+.status-area{margin-top:auto;padding-top:20px}
+.status{font-size:12px;overflow-wrap:anywhere;display:flex;align-items:flex-start;gap:9px}
+.status:before{content:"";width:7px;height:7px;background:var(--blue);border-radius:50%;margin-top:6px;flex-shrink:0}
+.status.error{color:var(--red)}
+.status.error:before{background:var(--red)}
+.progress{height:3px;background:#e5ebf3;border-radius:3px;overflow:hidden;margin-top:12px}
+.progress i{display:block;width:0;height:100%;background:var(--blue);transition:width .3s}
+.analysis-panel{padding:24px;min-width:0}
+.idle-result{padding-bottom:21px;border-bottom:1px solid var(--line);margin-bottom:20px}
+.idle-result strong{font-size:25px;font-weight:550;display:block;margin-bottom:6px}
+.idle-result p{font-size:12px;color:var(--muted);max-width:38ch}
+.result-head{display:flex;justify-content:space-between;align-items:start;gap:12px}
+.verdict{font-size:28px;font-weight:650;line-height:1.35;letter-spacing:-.02em}
+.verdict.real{color:var(--blue)}
+.verdict.fake{color:var(--red)}
+.stats{display:grid;grid-template-columns:1.1fr .8fr 1fr;gap:10px;padding:17px 0;border-bottom:1px solid var(--line);margin-bottom:10px}
+.stat small{display:block;font-size:11px;color:var(--muted)}
+.stat strong{font-size:21px;font-weight:600;font-variant-numeric:tabular-nums}
+.score-note{font-size:11px;color:var(--muted);margin-bottom:20px}
+.cascade-heading{display:flex;align-items:baseline;justify-content:space-between;margin:18px 0 14px}
+.cascade-heading span{font-size:11px;color:var(--muted)}
+.cascade-path{display:flex;flex-direction:column;gap:0}
+.cascade-stage{position:relative;display:grid;grid-template-columns:30px 1fr auto;column-gap:10px;align-items:start;min-height:76px;padding-bottom:18px}
+.cascade-stage:not(:last-child):before{content:"";position:absolute;left:13px;top:26px;bottom:0;border-left:2px solid var(--line)}
+.stage-node{border:1px solid #bdcadd;background:var(--paper);border-radius:50%;width:28px;height:28px;display:grid;place-items:center;font-size:12px;color:var(--muted);position:relative}
+.stage-info strong{font-size:15px;font-weight:600}
+.stage-info p{font-size:11px;color:var(--muted);margin-top:2px;font-variant-numeric:tabular-nums}
+.stage-outcome{font-size:11px;padding:3px 8px;border-radius:4px;background:var(--bg);color:var(--muted);white-space:nowrap}
+.cascade-stage.reached .stage-node{border-color:var(--blue);background:var(--blue-soft);color:var(--blue)}
+.cascade-stage.forward .stage-outcome{background:var(--amber-soft);color:var(--amber)}
+.cascade-stage.real .stage-outcome{background:var(--blue-soft);color:var(--blue)}
+.cascade-stage.fake .stage-outcome{background:var(--red-soft);color:var(--red)}
+.cascade-stage.skipped .stage-info{color:var(--muted)}
+.cascade-stage:last-child{min-height:46px;padding-bottom:0}
+.cascade-caption{font-size:11px;color:var(--muted);margin-top:18px;max-width:48ch}
+.evidence{margin-top:24px;padding:24px}
+.evidence-intro{font-size:12px;color:var(--muted);margin-bottom:16px}
+.faces{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:12px;margin-top:18px}
+.faces figure{margin:0;min-width:0}
+.faces>p{grid-column:1/-1}
+.faces img{width:100%;aspect-ratio:1;object-fit:cover;border:1px solid var(--line);border-radius:5px;background:var(--bg)}
+.faces figcaption{font-size:10px;color:var(--muted);overflow-wrap:anywhere;margin-top:4px}
+.downloads{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
+.downloads:empty{display:none}
+.downloads a{font-size:12px;text-decoration:none;border:1px solid var(--line);border-radius:6px;padding:7px 11px;background:white}
+.downloads a:hover{border-color:var(--blue)}
+.data-details{font-size:13px;color:var(--muted);margin-top:20px;padding-top:16px;border-top:1px solid var(--line)}
+summary{font-weight:500}
+pre{font-size:11px;white-space:pre-wrap;overflow-wrap:anywhere;background:var(--bg);padding:16px;border-radius:6px;max-height:400px;overflow:auto}
+.table-wrap{overflow-x:auto;margin-top:14px}
+table{width:100%;border-collapse:collapse;font-size:12px;font-variant-numeric:tabular-nums}
+th,td{text-align:left;border-bottom:1px solid var(--line);padding:12px 10px;vertical-align:top}
+th{font-size:11px;color:var(--muted);font-weight:500;background:var(--bg)}
+td:first-child{white-space:nowrap}
+.skipped{color:var(--muted)}
+.history-panel{margin-top:24px;padding:18px 24px}
+.history-panel summary{font-size:13px}
+.history-list{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;padding-top:16px}
+.history-list button{overflow-wrap:anywhere;text-align:left}
+.history-list button[aria-current="true"]{border-color:var(--blue);background:var(--blue-soft)}
+.page-footer{display:flex;justify-content:space-between;gap:20px;color:var(--muted);font-size:11px;padding-top:22px}
+.timeline{display:flex;gap:5px;overflow-x:auto;padding:8px 2px 12px;margin:16px 0 4px}
+.window-chip{flex:1 0 70px;max-width:110px;background:var(--bg);border:1px solid var(--line);border-top:4px solid #a8b7ca;border-radius:5px;padding:8px 7px;text-align:left;font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
+.window-chip strong{display:block;font-weight:600}
+.window-chip.fake{border-top-color:var(--red);color:var(--red)}
+.window-chip.real{border-top-color:var(--blue);color:var(--blue)}
+.window-chip.uncertain{border-top-color:var(--amber);color:var(--amber)}
+.window-chip[aria-pressed="true"]{outline:2px solid var(--blue);outline-offset:1px}
+.stream-focus{padding-bottom:16px;border-bottom:1px solid var(--line);margin-bottom:16px}
+.stream-focus strong{font-size:23px;display:block}
+.stream-focus p{font-size:12px;color:var(--muted);margin-top:6px}
+#warnings:not(:empty){margin-top:16px;padding:12px;background:var(--amber-soft);border-radius:6px}
+#stream-summary{font-size:13px}
+#stream-clock{font-size:12px;margin-top:8px}
+@media(min-width:1600px){.shell{max-width:1480px}
+.intro{padding-top:42px}
+.screen{min-height:330px}
+}
+@media(max-width:1000px){.shell{padding-left:24px;padding-right:24px}
+.control-row{gap:14px;grid-template-columns:1fr 1fr}
+.actions{grid-column:1/-1;display:flex;gap:10px}
+.primary{flex:1}
+.workspace{grid-template-columns:minmax(0,1.1fr) minmax(320px,1fr)}
+.intro-note{display:none}
+.faces{grid-template-columns:repeat(6,minmax(0,1fr))}
+.brand-caption{display:none}
+.header-actions{gap:14px}
+}
+@media(max-width:720px){.shell{padding-left:16px;padding-right:16px}
+header{min-height:68px}
+.brand{font-size:23px}
+.header-actions .badge{font-size:10px;max-width:150px}
+.header-actions a{display:none}
+.intro{padding:25px 0 20px}
+.intro p{font-size:13px}
+.control-row{grid-template-columns:1fr;gap:16px}
+.actions{grid-column:auto}
+.controls{padding:18px}
+.control-foot{align-items:flex-start;flex-direction:column;gap:10px}
+.advanced-grid{grid-template-columns:1fr;gap:16px}
+.workspace{grid-template-columns:1fr}
+.media-panel{border-right:0;border-bottom:1px solid var(--line);padding:18px}
+.analysis-panel,.evidence{padding:20px 18px}
+.faces{grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.history-list{grid-template-columns:1fr}
+.page-footer{flex-direction:column;gap:5px}
+.section-head{align-items:baseline}
+.stats{gap:8px}
+.stat strong{font-size:20px}
+.verdict{font-size:26px}
+.intro h1{font-size:28px}
+.file-picker input::file-selector-button{padding:10px}
+.media-meta{align-items:flex-start}
+.history-panel{padding:18px}
+}
+@media(prefers-reduced-motion:reduce){*,*:before,*:after{transition:none!important;animation:none!important;scroll-behavior:auto!important}
+}
 </style>
 </head>
-<body><main>
-<header><div class="brand">CASCA<span>de</span><div class="eyebrow">Video & streaming detection</div></div><span class="badge" id="device">本機 Demo · 載入設定中</span></header>
-<div class="intro"><div class="eyebrow">Offline & simulated streaming</div><h1>從一支影片，看見每一步判定。</h1><p class="muted">上傳 MP4，經人臉偵測與對齊後，依雙門檻政策執行 Xception → UCF → SBI。</p></div>
-<div class="layout"><aside>
-<section class="panel"><h2>01　選擇影片與分析方式</h2><div class="drop"><strong>MP4 影片</strong><input id="file" type="file" accept="video/mp4,.mp4" aria-label="選擇 MP4 影片"><p class="muted" id="limits" style="font-size:12px">最多 200 MiB、1200 秒（20 分鐘）、1920×1080 像素、32 幀</p></div>
-<label for="analysis-mode">分析方式</label><select id="analysis-mode"><option value="offline">離線 · 全片均勻取樣</option><option value="stream">模擬即時串流 · 4 秒一窗／2 幀每秒</option></select>
-<p id="stream-note" class="note" hidden>模型暖機後才原速播放。過載時保留最新等待窗，缺口會列為未分析。播放預設靜音；不支援暫停、跳轉或人物追蹤。</p>
-<label for="preprocessing-mode">人臉前處理</label><select id="preprocessing-mode"><option value="official">官方流程 · dlib / RetinaFace（預設）</option><option value="legacy">舊 YuNet · 僅供比較</option></select>
-<label for="policy">展示政策</label><select id="policy"><option value="early">Early Exit · 雙門檻 .2 / .8</option><option value="all_stages">全階段展示 · 前兩關 0 / 1</option></select>
-<p class="note">全階段政策鼓勵樣本續傳；分數恰為 0 或 1 時仍依門檻規則退場。</p>
-<label class="check"><input id="consent" type="checkbox"><span>我了解這是探索性功能展示，尚未完成正式模型效能驗收。</span></label>
-<button id="submit">開始分析影片 →</button><button id="stop" class="secondary" hidden disabled>停止串流</button><div id="status" class="status" role="status" aria-live="polite">選擇影片並確認探索模式後即可開始。</div><div id="failure-downloads" class="downloads"></div><div class="progress" aria-hidden="true"><i id="bar"></i></div>
-<footer>離線模式：全片最多均勻抽取 32 幀；影片越長取樣越稀疏，可能漏掉短暫換臉。長影片解碼時間會增加；解碼超過 180 秒、各人臉流程超過設定時間，或超出快取預算時會停止並顯示失敗。Xception/UCF 分析最大臉；官方 SBI 保留合格多臉並逐幀取最高分。不做人員追蹤。一次處理一支影片；原檔與歷史結果不覆寫。</footer></section>
-<section class="panel"><h2>最近的展示</h2><div id="history" class="muted">尚無紀錄</div></section>
-</aside><article>
-<section class="panel"><h2>02　影片與處理狀態</h2><div id="filename" class="file-name">尚未選擇影片</div><video id="player" controls playsinline hidden></video><div id="empty" class="empty"><div style="font-size:35px">▷</div><p>選擇影片，開始一次可追溯的分析</p><div class="steps"><span>MP4</span>→<span>人臉對齊</span>→<span>Cascade</span>→<span>影片級判定</span></div><p class="muted" style="font-size:12px">會保留完整結果與逐關決策，不需要 Ground Truth。</p></div></section>
-<section id="stream-results" class="panel" hidden><div class="eyebrow">Streaming · exploratory</div><h2>逐窗判定與分析覆蓋</h2><p id="stream-clock" class="muted"></p><p id="stream-summary"></p><p class="note">結果只屬於所列時間窗；未分析、取消或無有效人臉皆不是 REAL。來源真值未知，不計算準確率。</p><div class="table-wrap"><table><thead><tr><th>影片時間窗</th><th>狀態／判定</th><th>分數／退出</th><th>Profile 覆蓋</th><th>延遲</th></tr></thead><tbody id="stream-windows"></tbody></table></div><div id="stream-downloads" class="downloads"></div><details><summary>逐關、Profile 與追溯資訊</summary><pre id="stream-provenance"></pre></details></section>
-<section id="results" class="panel" hidden><div class="result-head"><div><div class="eyebrow">Video-level decision</div><div id="verdict" class="verdict"></div><p id="result-file" class="file-name"></p></div><span class="badge">探索性結果</span></div>
-<div class="stats"><div class="stat"><small>最終 Fake Score</small><strong id="score"></strong></div><div class="stat"><small>退出階段</small><strong id="exit"></strong></div><div class="stat"><small>處理總耗時</small><strong id="runtime"></strong></div></div>
-<p class="muted" style="font-size:12px">Fake score 並非判斷正確的機率。耗時不含上傳；包含解碼、人臉處理與模型載入／推論。</p>
-<div class="table-wrap"><table><thead><tr><th>階段</th><th>Fake score</th><th>門檻 L / H</th><th>決策</th><th>Forward</th></tr></thead><tbody id="stages"></tbody></table></div>
-<p id="coverage" class="muted"></p><div id="faces" class="faces"></div><div id="warnings" class="note"></div>
-<div class="downloads" id="downloads"></div><details><summary>追溯資訊</summary><pre id="provenance"></pre></details><footer>Ground Truth：未知。本頁不計算 Accuracy、FAR 或 FRR。</footer></section>
-</article></div></main>
+<body>
+<div class="topbar"><header class="shell"><div class="identity"><div class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></div><div class="brand">CASCAde</div><span class="brand-caption">影片鑑別研究室</span></div><div class="header-actions"><a href="#history-panel">分析紀錄</a><span class="badge" id="device">本機服務連線中</span></div></header></div>
+<main class="shell">
+<div class="intro"><div><h1>看見判斷，也看懂依據。</h1><p>從影片到人臉取樣，沿著 Xception、UCF 與 SBI，檢視每一關的判斷。</p></div><span class="intro-note">研究展示用途・來源真值未知</span></div>
+<section class="panel controls" aria-label="分析設定">
+<div class="control-row"><div><label class="field-label" for="file">選擇分析影片</label><div class="file-picker"><input id="file" type="file" accept="video/mp4,.mp4" aria-label="選擇 MP4 影片"></div></div><div><label class="field-label" for="analysis-mode">分析方式</label><select id="analysis-mode"><option value="offline">離線分析 · 全片取樣</option><option value="stream">模擬即時串流 · 4 秒一窗</option></select></div><div class="actions"><button id="submit" class="primary">開始分析影片</button> <button id="stop" class="secondary" hidden disabled>停止串流</button></div></div>
+<p id="limits" class="limits">MP4 · ≤200 MiB · ≤1200 秒（20 分鐘） · ≤1920×1080 像素 · 最多 32 幀</p>
+<div class="control-foot"><label class="check"><input id="consent" type="checkbox"><span>我了解此為探索性研究展示，尚未完成正式模型效能驗收。</span></label><span class="small muted">每次分析一支影片</span></div>
+<p id="stream-note" class="note" hidden>模型暖機後才原速播放，每秒取樣 2 幀。過載時保留最新等待窗，缺口會列為未分析。播放預設靜音；不支援暫停、跳轉或人物追蹤。</p>
+<details class="advanced"><summary>進階設定與取樣說明</summary><div class="advanced-grid"><div><label for="preprocessing-mode">人臉前處理</label><select id="preprocessing-mode"><option value="official">官方流程 · dlib / RetinaFace</option><option value="legacy">舊 YuNet · 僅供比較</option></select></div><div><label for="policy">Cascade 展示政策</label><select id="policy"><option value="early">Early Exit · 雙門檻 0.2 / 0.8</option><option value="all_stages">全階段展示 · 前兩關 0 / 1</option></select><p class="note">全階段政策鼓勵樣本續傳；分數恰為 0 或 1 時仍依門檻規則退場。</p></div></div><p class="method-note">離線模式全片最多均勻抽取 32 幀，長影片取樣較稀疏，可能漏掉短暫換臉。解碼超過 180 秒、各人臉流程超過設定時間，或超出快取預算時會停止並顯示失敗。Xception／UCF 分析最大臉；官方 SBI 保留合格多臉並逐幀取最高分。不進行人物追蹤。</p></details>
+</section>
+<div class="panel workspace">
+<section class="media-panel" aria-labelledby="media-title"><div class="section-head"><h2 id="media-title">影片檢視</h2><span id="mode-label">離線分析</span></div><div class="screen"><video id="player" controls playsinline hidden></video><div id="empty" class="empty"><div class="film-icon" aria-hidden="true"></div><p>從一支影片開始</p><small>選擇 MP4，即可預覽並檢視分析過程。</small></div></div><div class="media-meta"><span id="filename" class="file-name">尚未選擇影片</span><span class="small muted">來源影片</span></div><div class="status-area"><div id="status" class="status" role="status" aria-live="polite">選擇影片並確認研究展示說明後，即可開始。</div><div class="progress" aria-hidden="true"><i id="bar"></i></div><div id="failure-downloads" class="downloads"></div></div></section>
+<section class="analysis-panel" aria-labelledby="analysis-title"><div class="section-head"><h2 id="analysis-title">分析結果</h2><span>探索性結果</span></div>
+<div id="decision-empty" class="idle-result"><strong id="decision-state">等待分析</strong><p id="decision-help">分析完成後，這裡會顯示判斷結果與模型決策路徑。</p></div>
+<div id="results" hidden><div class="result-head"><div><div id="verdict" class="verdict"></div><p id="result-file" class="file-name"></p></div></div><div class="stats"><div class="stat"><small>最終 Fake score</small><strong id="score"></strong></div><div class="stat"><small>退出階段</small><strong id="exit"></strong></div><div class="stat"><small>處理總耗時</small><strong id="runtime"></strong></div></div><p class="score-note">Fake score 並非判斷正確的機率。耗時包含解碼、人臉處理及模型載入／推論，不含上傳。</p></div>
+<div id="stream-focus" class="stream-focus" hidden><strong id="window-verdict"></strong><p id="window-context"></p></div>
+<div class="cascade-heading"><h3>模型決策路徑</h3><span id="path-context">尚未執行</span></div><div id="cascade-path" class="cascade-path"></div><p class="cascade-caption">分數落在雙門檻之間時，交由下一個模型判斷；已作出判斷後，後續模型不再執行。</p>
+</section></div>
+<section id="evidence" class="panel evidence" hidden aria-labelledby="evidence-title"><div class="section-head"><h2 id="evidence-title">人臉取樣與分析證據</h2><span>實際前處理輸出</span></div><p id="coverage" class="evidence-intro"></p><div id="faces" class="faces"></div><div id="warnings" class="note"></div><details class="data-details"><summary>逐關分數、門檻與推論耗時</summary><div class="table-wrap"><table><thead><tr><th scope="col">階段／模型</th><th scope="col">Fake score</th><th scope="col">門檻 L / H</th><th scope="col">決策</th><th scope="col">Forward</th></tr></thead><tbody id="stages"></tbody></table></div></details><div class="downloads" id="downloads"></div><details class="data-details"><summary>來源與版本追溯</summary><pre id="provenance"></pre></details></section>
+<section id="stream-results" class="panel evidence" hidden aria-labelledby="stream-title"><div class="section-head"><h2 id="stream-title">影片時間窗</h2><span>每窗獨立判斷</span></div><p id="stream-summary"></p><p id="stream-clock" class="muted"></p><div id="timeline" class="timeline" role="group" aria-label="選擇時間窗查看模型決策"></div><p class="note">結果僅代表所列時間窗，未分析、取消或無有效人臉不代表 REAL。執行中選窗只切換證據；串流結束後可同時定位影片。</p><details class="data-details"><summary>完整時間窗數據與覆蓋範圍</summary><div class="table-wrap"><table><thead><tr><th scope="col">影片時間窗</th><th scope="col">狀態／判定</th><th scope="col">分數／退出</th><th scope="col">Profile 覆蓋</th><th scope="col">延遲</th></tr></thead><tbody id="stream-windows"></tbody></table></div></details><div id="stream-downloads" class="downloads"></div><details class="data-details"><summary>逐關、Profile 與追溯資訊</summary><pre id="stream-provenance"></pre></details></section>
+<details id="history-panel" class="panel history-panel"><summary>最近的分析紀錄</summary><div id="history" class="history-list muted">尚無紀錄</div></details>
+<footer class="page-footer"><span>CASCAde · Deepfake 影片鑑別研究展示</span><span>Ground Truth 未知，因此不計算 Accuracy、FAR 或 FRR。</span></footer>
+</main>
+
 <script>
+
 const $=id=>document.getElementById(id);let current=null,timer=null,objectUrl=null,busy=false,streamPlaying=null,streamEpoch=null,offlineLimits='MP4 · ≤200 MiB · ≤1200 秒（20 分鐘） · ≤1920×1080 像素 · 最多 32 幀';
-function status(message,error=false){$('status').textContent=message;$('status').classList.toggle('error',error)}
-function clearResult(){ $('stream-results').hidden=true; $('results').hidden=true; $('stages').replaceChildren(); $('faces').replaceChildren(); $('failure-downloads').replaceChildren(); }
-function progress(phase){if(['starting','playing','draining','stopping','stopped'].includes(phase)){$('bar').style.width=phase==='starting'?'15%':phase==='stopped'?'100%':'65%';return;}$('bar').style.width=({uploading:8,queued:15,validating:20,preprocessing:40,inference:75,finalizing:95,complete:100,failed:0})[phase]+'%'}
-async function loadHistory(){try{const jobs=await (await fetch('/api/jobs')).json();$('history').replaceChildren();if(!jobs.length){$('history').textContent='尚無紀錄';return}for(const job of jobs){const b=document.createElement('button');b.className='secondary';b.textContent=job.filename+' · '+job.phase;b.onclick=()=>selectJob(job.id);$('history').append(b)}}catch(e){}}
-function showReport(job){const r=job.report,d=r.decisions[0];$('results').hidden=false;$('verdict').textContent=d.decision==='FAKE'?'FAKE · 疑似偽造':'REAL · 判為真實';$('verdict').className='verdict '+d.decision.toLowerCase();$('result-file').textContent=job.filename;$('score').textContent=d.score.toFixed(4);$('exit').textContent=d.exit_stage+' / '+r.stages.length;$('runtime').textContent=r.runtime_seconds.toFixed(2)+' s';$('stages').replaceChildren();
-for(const s of r.stages){const trace=r.trace.find(t=>t.stage===s.stage);const tr=document.createElement('tr');for(const value of [s.stage+'. '+s.detector.toUpperCase(),trace?trace.score.toFixed(4):'—',trace?trace.low+' / '+trace.high:'—',trace?trace.decision:'未執行',s.model_loaded?(s.timing.forward_seconds*1000).toFixed(1)+' ms':'—']){const td=document.createElement('td');td.textContent=value;tr.append(td)}if(!trace)tr.className='skipped';$('stages').append(tr)}
+const modelNames={xception:'Xception',ucf:'UCF',sbi:'SBI'};
+const phaseNames={uploading:'上傳中',queued:'等待處理',validating:'檢查影片',preprocessing:'人臉取樣中',inference:'模型分析中',finalizing:'整理結果',complete:'已完成',failed:'分析失敗',starting:'模型暖機中',playing:'串流分析中',draining:'等待分析完成',stopping:'正在停止',stopped:'已停止'};
+const outcomeNames={collecting:'收集中',waiting:'等待中',processing:'推論中',skipped:'未分析／過載',cancelled:'已取消',unable_to_decide:'無法判定',failed:'失敗'};
+let selectedWindow=null;
+function renderCascade(trace=[],stages=null,finished=false){
+  const models=stages||[{stage:1,detector:'xception'},{stage:2,detector:'ucf'},{stage:3,detector:'sbi'}];
+  $('cascade-path').replaceChildren();
+  for(const model of models){
+    const row=trace.find(t=>t.stage===model.stage);
+    const stage=document.createElement('div');
+    const decision=row?.decision;
+    stage.className='cascade-stage '+(row?'reached '+(decision==='FAKE'?'fake':decision==='REAL'?'real':'forward'):finished?'skipped':'pending');
+    const node=document.createElement('span');node.className='stage-node';node.textContent=model.stage;
+    const info=document.createElement('div');info.className='stage-info';
+    const name=document.createElement('strong');name.textContent=modelNames[model.detector]||model.detector;
+    const detail=document.createElement('p');detail.textContent=row?'Fake score '+row.score.toFixed(4)+' · 門檻 '+row.low+' / '+row.high:finished?'此階段未執行':'分析後顯示分數與門檻';
+    const state=document.createElement('span');state.className='stage-outcome';state.textContent=row?(decision==='FAKE'?'疑似偽造':decision==='REAL'?'判為真實':'續傳下一關'):finished?'未執行':'待分析';
+    info.append(name,detail);stage.append(node,info,state);$('cascade-path').append(stage);
+  }
+}
+function addFace(img){
+  const figure=document.createElement('figure');const caption=document.createElement('figcaption');caption.textContent=img.alt;img.loading='lazy';figure.append(img,caption);$('faces').append(figure);
+}
+function showWindow(w,job){
+  $('decision-empty').hidden=true;$('stream-focus').hidden=false;
+  $('window-verdict').textContent=w.decision==='FAKE'?'FAKE · 疑似偽造':w.decision==='REAL'?'REAL · 判為真實':outcomeNames[w.outcome]||'尚無判定';
+  $('window-verdict').className='verdict '+(w.decision==='FAKE'?'fake':w.decision==='REAL'?'real':'');
+  $('window-context').textContent=w.start_seconds.toFixed(2)+'–'+w.end_seconds.toFixed(2)+' 秒'+(w.score==null?'':' · Fake score '+w.score.toFixed(4))+'。僅代表此時間窗，分數並非判斷正確的機率。'+(w.reason?' '+w.reason:'');
+  $('path-context').textContent='所選時間窗';renderCascade(w.trace||[],null,['decided','skipped','cancelled','unable_to_decide','failed'].includes(w.outcome));
+}
+function renderTimeline(job){
+  const windows=job.report.windows||[];
+  const active=!['complete','stopped','failed'].includes(job.phase);
+  const focus=windows.find(w=>w.start_seconds===selectedWindow)||[...windows].reverse().find(w=>w.decision)||windows.at(-1);
+  const oldButtons=new Map([...$('timeline').children].map(b=>[b.dataset.start,b]));
+  for(const w of windows){
+    const key=String(w.start_seconds);const b=oldButtons.get(key)||document.createElement('button');
+    b.type='button';b.dataset.start=key;b.className='window-chip '+(w.decision==='FAKE'?'fake':w.decision==='REAL'?'real':w.outcome==='skipped'?'uncertain':'');
+    b.setAttribute('aria-pressed',String(w===focus));b.setAttribute('aria-label',w.start_seconds.toFixed(2)+' 至 '+w.end_seconds.toFixed(2)+' 秒，'+(w.decision||outcomeNames[w.outcome]||w.outcome));
+    b.replaceChildren();const time=document.createElement('strong');time.textContent=Number(w.start_seconds.toFixed(2))+'–'+Number(w.end_seconds.toFixed(2))+' s';const state=document.createElement('span');state.textContent=w.decision||outcomeNames[w.outcome]||w.outcome;b.append(time,state);
+    b.onclick=()=>{selectedWindow=w.start_seconds;showWindow(w,job);for(const chip of $('timeline').children)chip.setAttribute('aria-pressed',String(chip===b));if(!active)$('player').currentTime=w.start_seconds;};
+    if(!oldButtons.has(key))$('timeline').append(b);oldButtons.delete(key);
+  }
+  for(const b of oldButtons.values())b.remove();
+  if(focus)showWindow(focus,job);
+}
+
+function status(message,error=false){$('status').textContent=message;$('status').classList.toggle('error',error);if(error&&!$('decision-empty').hidden){$('decision-state').textContent='需要處理';$('decision-help').textContent=message;}}
+function clearResult(){ $('stream-results').hidden=true; $('results').hidden=true; $('stages').replaceChildren(); $('faces').replaceChildren(); $('failure-downloads').replaceChildren(); $('evidence').hidden=true;$('decision-empty').hidden=false;$('decision-state').textContent='等待分析';$('decision-help').textContent='分析完成後，這裡會顯示判斷結果與模型決策路徑。';$('stream-focus').hidden=true;$('path-context').textContent='尚未執行';selectedWindow=null;$('timeline').replaceChildren();renderCascade(); }
+function progress(phase){if(!$('decision-empty').hidden){$('decision-state').textContent=phaseNames[phase]||'準備分析';$('decision-help').textContent=phase==='failed'?'請查看影片下方的錯誤說明與診斷檔案。':phase==='complete'?'正在整理分析結果。':'分析結果會在處理完成後顯示。';}$('path-context').textContent=phase==='complete'?'分析完成':phase==='failed'?'未完成分析':'等待結果';if(['starting','playing','draining','stopping','stopped'].includes(phase)){$('bar').style.width=phase==='starting'?'15%':phase==='stopped'?'100%':'65%';return;}$('bar').style.width=({uploading:8,queued:15,validating:20,preprocessing:40,inference:75,finalizing:95,complete:100,failed:0})[phase]+'%'}
+async function loadHistory(){try{const jobs=await (await fetch('/api/jobs')).json();$('history').replaceChildren();if(!jobs.length){$('history').textContent='尚無紀錄';return}for(const job of jobs){const b=document.createElement('button');b.className='secondary';b.textContent=job.filename+' · '+(phaseNames[job.phase]||job.phase);b.setAttribute('aria-current',String(job.id===current));b.onclick=()=>selectJob(job.id);$('history').append(b)}}catch(e){$('history').textContent='無法載入紀錄，請重新整理頁面重試。';}}
+function showReport(job){const r=job.report,d=r.decisions[0];$('results').hidden=false;$('evidence').hidden=false;$('decision-empty').hidden=true;$('stream-focus').hidden=true;renderCascade(r.trace,r.stages,true);$('path-context').textContent='退出於第 '+d.exit_stage+' 關';$('verdict').textContent=d.decision==='FAKE'?'FAKE · 疑似偽造':'REAL · 判為真實';$('verdict').className='verdict '+d.decision.toLowerCase();$('result-file').textContent=job.filename;$('score').textContent=d.score.toFixed(4);$('exit').textContent=d.exit_stage+' / '+r.stages.length;$('runtime').textContent=r.runtime_seconds.toFixed(2)+' s';$('stages').replaceChildren();
+for(const s of r.stages){const trace=r.trace.find(t=>t.stage===s.stage);const tr=document.createElement('tr');for(const value of [s.stage+'. '+(modelNames[s.detector]||s.detector),trace?trace.score.toFixed(4):'—',trace?trace.low+' / '+trace.high:'—',trace?({REAL:'REAL · 判為真實',FAKE:'FAKE · 疑似偽造',UNCERTAIN:'續傳下一關'}[trace.decision]||trace.decision):'未執行',s.model_loaded?(s.timing.forward_seconds*1000).toFixed(1)+' ms':'—']){const td=document.createElement('td');td.textContent=value;tr.append(td)}if(!trace)tr.className='skipped';$('stages').append(tr)}
 const p=r.preprocessing;$('faces').replaceChildren();let count=0;
-if(p.profiles){const summaries=[];for(const [name,profile] of Object.entries(p.profiles)){const result=profile.result;summaries.push(name+'：'+(result?result.valid_face_frames+'/'+p.sampled_frame_count+' 幀、'+result.face_count+' 張臉':profile.state));let profileCount=0;if(result)for(const sample of result.samples){for(const face of sample.faces){if(profileCount++>=6||count++>=12)break;const img=document.createElement('img');img.src='/jobs/'+job.id+'/profiles/'+encodeURIComponent(name)+'/'+face.path.replaceAll('\\','/').split('/').pop();img.alt=name+' · '+sample.timestamp_seconds.toFixed(2)+' 秒';$('faces').append(img)}}}$('coverage').textContent=(p.mode==='official'?'官方流程':'舊 YuNet 比較')+' · '+summaries.join(' · ')}
-else{$('coverage').textContent='歷史結果 · 前處理版本未記錄 · 有效影格 '+p.valid_face_frames+'/'+p.sampled_frame_count;for(const sample of p.samples.filter(x=>x.path).slice(0,12)){const img=document.createElement('img');img.src='/jobs/'+job.id+'/frames/'+sample.path.replaceAll('\\','/').split('/').pop();img.alt='歷史人臉影格 '+sample.frame_index;$('faces').append(img)}}
-$('warnings').textContent=r.warnings.join(' ');$('downloads').replaceChildren();for(const [file,label] of [['report.json','完整報告 JSON'],['decisions.csv','最終判定 CSV'],['trace.csv','逐關紀錄 CSV'],['manifest.json','來源與版本'],['preprocessing.json','前處理紀錄']]){if(!p.profiles&&file==='preprocessing.json')continue;const a=document.createElement('a');a.href='/jobs/'+job.id+'/'+file;a.download=file;a.textContent=label;$('downloads').append(a)}$('provenance').textContent=JSON.stringify({job_id:job.id,input_sha256:r.input_sha256,policy_id:r.policy_id,preprocessing_mode:p.mode||'historical_unrecorded',profiles:p.model_profiles||p.profile,sampling:p.sampling,ground_truth:null},null,2)}
+if(p.profiles){const summaries=[];for(const [name,profile] of Object.entries(p.profiles)){const result=profile.result;summaries.push(name+'：'+(result?result.valid_face_frames+'/'+p.sampled_frame_count+' 幀、'+result.face_count+' 張臉':profile.state));let profileCount=0;if(result)for(const sample of result.samples){for(const face of sample.faces){if(profileCount++>=6||count++>=12)break;const img=document.createElement('img');img.src='/jobs/'+job.id+'/profiles/'+encodeURIComponent(name)+'/'+face.path.replaceAll('\\','/').split('/').pop();img.alt=name+' · '+sample.timestamp_seconds.toFixed(2)+' 秒';addFace(img)}}}$('coverage').textContent=(p.mode==='official'?'官方流程':'舊 YuNet 比較')+' · '+summaries.join(' · ')}
+else{$('coverage').textContent='歷史結果 · 前處理版本未記錄 · 有效影格 '+p.valid_face_frames+'/'+p.sampled_frame_count;for(const sample of p.samples.filter(x=>x.path).slice(0,12)){const img=document.createElement('img');img.src='/jobs/'+job.id+'/frames/'+sample.path.replaceAll('\\','/').split('/').pop();img.alt='歷史人臉影格 '+sample.frame_index;addFace(img)}}
+if(!$('faces').children.length){const empty=document.createElement('p');empty.className='muted small';empty.textContent='此紀錄沒有可顯示的人臉縮圖，可下載前處理紀錄查看覆蓋情況。';$('faces').append(empty);}$('warnings').textContent=r.warnings.join(' ');$('downloads').replaceChildren();for(const [file,label] of [['report.json','完整報告 JSON'],['decisions.csv','最終判定 CSV'],['trace.csv','逐關紀錄 CSV'],['manifest.json','來源與版本'],['preprocessing.json','前處理紀錄']]){if(!p.profiles&&file==='preprocessing.json')continue;const a=document.createElement('a');a.href='/jobs/'+job.id+'/'+file;a.download=file;a.textContent=label;$('downloads').append(a)}$('provenance').textContent=JSON.stringify({job_id:job.id,input_sha256:r.input_sha256,policy_id:r.policy_id,preprocessing_mode:p.mode||'historical_unrecorded',profiles:p.model_profiles||p.profile,sampling:p.sampling,ground_truth:null},null,2)}
 function showFailure(job){$('failure-downloads').replaceChildren();for(const file of job.diagnostic_files||[]){const a=document.createElement('a');a.href='/jobs/'+job.id+'/'+file;a.download=file;a.textContent='下載診斷 '+file;$('failure-downloads').append(a)}}
 function setBusy(value){busy=value;$('submit').disabled=value;for(const id of ['file','analysis-mode','preprocessing-mode','policy'])$(id).disabled=value||(id==='policy'&&$('analysis-mode').value==='stream');}
-function showStream(job){$('stop').hidden=false;const r=job.report;if(!r)return;$('stream-results').hidden=false;$('results').hidden=true;const summary=r.summary||{};$('stream-summary').textContent='已判定 '+(summary.decided||0)+' 窗 · 過載略過 '+(summary.skipped||0)+' · 無法判定 '+(summary.unable_to_decide||0)+' · 取消 '+(summary.cancelled||0)+' · p95 '+(summary.p95_latency_seconds==null?'—':summary.p95_latency_seconds.toFixed(3)+' s');$('stream-windows').replaceChildren();const labels={collecting:'收集中',waiting:'等待中',processing:'推論中',skipped:'未分析／過載',cancelled:'已取消',unable_to_decide:'無法判定',failed:'失敗'};
+function showStream(job){$('stop').hidden=false;const r=job.report;if(!r)return;renderTimeline(job);$('stream-results').hidden=false;$('results').hidden=true;const summary=r.summary||{};$('stream-summary').textContent='已判定 '+(summary.decided||0)+' 窗 · 過載略過 '+(summary.skipped||0)+' · 無法判定 '+(summary.unable_to_decide||0)+' · 取消 '+(summary.cancelled||0)+' · p95 '+(summary.p95_latency_seconds==null?'—':summary.p95_latency_seconds.toFixed(3)+' s');$('stream-windows').replaceChildren();const labels={collecting:'收集中',waiting:'等待中',processing:'推論中',skipped:'未分析／過載',cancelled:'已取消',unable_to_decide:'無法判定',failed:'失敗'};
 for(const w of [...r.windows].reverse()){const tr=document.createElement('tr');const coverage=Object.entries(w.profiles||{}).map(([name,p])=>name+': '+(p.valid_face_frames==null?p.state:p.valid_face_frames+'/'+p.planned_samples+' 幀、'+p.face_count+' 臉'+(p.valid_face_frames<p.planned_samples?'（部分取樣無有效臉）':''))).join(' · ');for(const value of [w.start_seconds.toFixed(2)+'–'+w.end_seconds.toFixed(2)+' s',(w.decision||labels[w.outcome]||w.outcome)+(w.reason?' · '+w.reason:''),w.score==null?'—':w.score.toFixed(4)+' / Stage '+w.exit_stage+(w.exit_stage<3?' · 後續未執行':''),coverage||'—',w.latency_seconds==null?'—':w.latency_seconds.toFixed(3)+' s']){const td=document.createElement('td');td.textContent=value;tr.append(td)}$('stream-windows').append(tr)}
-$('stream-downloads').replaceChildren();for(const [file,label] of [['report.json','完整逐窗／逐關 JSON'],['windows.csv','時間窗 CSV'],['manifest.json','模型／來源與設定']]){if(file==='manifest.json'&&!r.provenance)continue;const a=document.createElement('a');a.href='/jobs/'+job.id+'/'+file;a.download=file;a.textContent=label;$('stream-downloads').append(a)}$('stream-provenance').textContent=JSON.stringify({startup_seconds:r.startup_seconds,resource_budget:r.resource_budget,windows:r.windows},null,2);
+$('stream-downloads').replaceChildren();for(const [file,label] of [['report.json','完整逐窗／逐關 JSON'],['windows.csv','時間窗 CSV'],['manifest.json','模型／來源與設定']]){if(file==='manifest.json'&&!r.provenance)continue;const a=document.createElement('a');a.href='/jobs/'+job.id+'/'+file;a.download=file;a.textContent=label;$('stream-downloads').append(a)}if(['complete','stopped','failed'].includes(job.phase))$('stream-clock').textContent='串流已結束，可選擇時間窗定位影片並查看決策。';$('stream-provenance').textContent=JSON.stringify({startup_seconds:r.startup_seconds,resource_budget:r.resource_budget,windows:r.windows},null,2);
 const active=['playing','draining','stopping'].includes(job.phase);if(r.playback_started_unix_seconds&&active){streamEpoch=r.playback_started_unix_seconds;const media=Math.min(r.source.duration_seconds,Math.max(0,Date.now()/1000-streamEpoch));$('stream-clock').textContent='來源播放進度約 '+media.toFixed(1)+' s；每筆結果的時間範圍另列。';if(streamPlaying!==job.id){streamPlaying=job.id;$('player').src='/jobs/'+job.id+'/input.mp4';$('player').muted=true;$('player').controls=false;$('player').hidden=false;$('player').currentTime=media;$('player').play().catch(()=>status('後端串流持續執行；瀏覽器尚無法播放，請確認影片編碼。'));}else if(!$('player').seeking&&Math.abs($('player').currentTime-media)>1.2){$('player').currentTime=media;}}else if(!active){$('player').pause();$('player').controls=true;streamEpoch=null;}}
 async function poll(){if(!current)return;try{const response=await fetch('/api/jobs/'+current);if(!response.ok)throw Error('找不到工作');const job=await response.json();status(job.message,job.phase==='failed');progress(job.phase);if(job.analysis_mode==='stream')showStream(job);if(['complete','stopped','failed'].includes(job.phase)){setBusy(false);$('stop').disabled=true;if(job.phase==='complete'&&job.analysis_mode!=='stream')showReport(job);else if(job.phase==='failed')showFailure(job);await loadHistory();return}setBusy(true);$('stop').disabled=job.analysis_mode!=='stream';timer=setTimeout(poll,400)}catch(e){status('讀取進度失敗，將重試：'+e.message,true);timer=setTimeout(poll,1200)}}
-async function selectJob(id){if(busy&&id!==current){status('目前工作尚未完成；完成後可查看其他紀錄。',true);return}streamPlaying=null;streamEpoch=null;clearTimeout(timer);current=id;clearResult();$('player').src='/jobs/'+id+'/input.mp4';$('player').hidden=false;$('empty').hidden=true;try{const response=await fetch('/api/jobs/'+id);if(!response.ok)throw Error('找不到工作');const job=await response.json();$('filename').textContent=job.filename;$('analysis-mode').value=job.analysis_mode||'offline';$('analysis-mode').onchange();$('preprocessing-mode').value=job.preprocessing_mode||'official';poll();}catch(e){status(e.message,true);}}
-$('file').onchange=()=>{if(busy)return;clearTimeout(timer);current=null;clearResult();const file=$('file').files[0];if(!file)return;if(objectUrl)URL.revokeObjectURL(objectUrl);objectUrl=URL.createObjectURL(file);$('player').src=objectUrl;$('player').hidden=false;$('empty').hidden=true;$('filename').textContent=file.name;status('影片已選擇，確認政策後開始分析。');$('bar').style.width='0%'};
-$('submit').onclick=async()=>{const file=$('file').files[0];if(!file||!file.name.toLowerCase().endsWith('.mp4')){status('請先選擇 MP4 影片。',true);return}if(!$('consent').checked){status('請先確認探索性展示說明。',true);return}if(!file.size||file.size>200*1024*1024){status('檔案為空或超過 200 MiB。',true);return}clearTimeout(timer);clearResult();setBusy(true);$('player').pause();streamPlaying=null;streamEpoch=null;$('stop').hidden=$('analysis-mode').value!=='stream';$('stop').disabled=true;status('上傳影片中…');progress('uploading');try{const configResponse=await fetch('/api/config',{cache:'no-store'});if(!configResponse.ok)throw Error('無法確認後端版本，請重新啟動服務。');const server=await configResponse.json();const wanted=$('analysis-mode').value;if(wanted==='stream'&&!(server.api_version>=2&&server.analysis_modes?.includes('stream')))throw Error('目前連線的後端仍是舊版，不支援串流。請關閉舊服務，重新執行 Start_Offline_Demo.cmd，再重新整理頁面；本次未上傳或啟動離線分析。');const query=new URLSearchParams({filename:file.name,policy:$('policy').value,preprocessing_mode:$('preprocessing-mode').value,analysis_mode:$('analysis-mode').value,exploratory:'true'});const response=await fetch('/api/jobs?'+query,{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:file});const data=await response.json();if(!response.ok)throw Error(data.error);if(wanted==='stream'&&data.analysis_mode!=='stream')throw Error('後端未接受串流模式，請重新啟動服務；不要將這次工作視為串流。');current=data.id;$('stop').disabled=false;poll()}catch(e){status(e.message,true);setBusy(false);progress('failed')}};
-$('analysis-mode').onchange=()=>{const stream=$('analysis-mode').value==='stream';$('stream-note').hidden=!stream;$('limits').textContent=stream?'MP4 · ≤200 MiB · ≤1200 秒（20 分鐘） · ≤1920×1080 像素 · 每窗最多 8 個來源幀':offlineLimits;$('stop').hidden=!stream;$('policy').disabled=stream;if(stream)$('policy').value='early';$('player').controls=!stream;$('player').pause();$('submit').textContent=stream?'開始模擬串流 →':'開始分析影片 →';};
+async function selectJob(id){if(busy&&id!==current){status('目前工作尚未完成；完成後可查看其他紀錄。',true);return}$('player').pause();$('player').controls=true;streamPlaying=null;streamEpoch=null;clearTimeout(timer);current=id;clearResult();$('player').src='/jobs/'+id+'/input.mp4';$('player').hidden=false;$('empty').hidden=true;try{const response=await fetch('/api/jobs/'+id);if(!response.ok)throw Error('找不到工作');const job=await response.json();$('filename').textContent=job.filename;$('analysis-mode').value=job.analysis_mode||'offline';$('analysis-mode').onchange();$('preprocessing-mode').value=job.preprocessing_mode||'official';poll();}catch(e){status(e.message,true);}}
+$('file').onchange=()=>{if(busy)return;const file=$('file').files[0];if(!file)return;clearTimeout(timer);current=null;clearResult();$('player').pause();$('player').controls=true;streamPlaying=null;streamEpoch=null;if(objectUrl)URL.revokeObjectURL(objectUrl);objectUrl=URL.createObjectURL(file);$('player').src=objectUrl;$('player').hidden=false;$('empty').hidden=true;$('filename').textContent=file.name;status('影片已選擇，確認政策後開始分析。');$('bar').style.width='0%'};
+$('submit').onclick=async()=>{const file=$('file').files[0];if(!file||!file.name.toLowerCase().endsWith('.mp4')){status('請先選擇 MP4 影片。',true);return}if(!$('consent').checked){status('請先確認探索性展示說明。',true);return}if(!file.size||file.size>200*1024*1024){status('檔案為空或超過 200 MiB。',true);return}clearTimeout(timer);clearResult();setBusy(true);$('filename').textContent=file.name;$('empty').hidden=true;$('player').hidden=false;if(objectUrl)$('player').src=objectUrl;$('player').pause();streamPlaying=null;streamEpoch=null;$('stop').hidden=$('analysis-mode').value!=='stream';$('stop').disabled=true;status('上傳影片中…');progress('uploading');try{const configResponse=await fetch('/api/config',{cache:'no-store'});if(!configResponse.ok)throw Error('無法確認後端版本，請重新啟動服務。');const server=await configResponse.json();const wanted=$('analysis-mode').value;if(wanted==='stream'&&!(server.api_version>=2&&server.analysis_modes?.includes('stream')))throw Error('目前連線的後端仍是舊版，不支援串流。請關閉舊服務，重新執行 Start_Offline_Demo.cmd，再重新整理頁面；本次未上傳或啟動離線分析。');const query=new URLSearchParams({filename:file.name,policy:$('policy').value,preprocessing_mode:$('preprocessing-mode').value,analysis_mode:$('analysis-mode').value,exploratory:'true'});const response=await fetch('/api/jobs?'+query,{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:file});const data=await response.json();if(!response.ok)throw Error(data.error);if(wanted==='stream'&&data.analysis_mode!=='stream')throw Error('後端未接受串流模式，請重新啟動服務；不要將這次工作視為串流。');current=data.id;$('stop').disabled=false;poll()}catch(e){status(e.message,true);setBusy(false);progress('failed')}};
+$('analysis-mode').onchange=(event)=>{if(event&&!busy){clearTimeout(timer);current=null;clearResult();status('分析方式已切換，選擇影片後開始新的分析。');$('bar').style.width='0%';}const stream=$('analysis-mode').value==='stream';$('stream-note').hidden=!stream;$('limits').textContent=stream?'MP4 · ≤200 MiB · ≤1200 秒（20 分鐘） · ≤1920×1080 像素 · 每窗最多 8 個來源幀':offlineLimits;$('stop').hidden=!stream;$('stop').disabled=!busy;$('policy').disabled=stream||busy;if(stream)$('policy').value='early';$('player').controls=!stream;$('player').pause();$('submit').textContent=stream?'開始模擬串流':'開始分析影片';$('mode-label').textContent=stream?'模擬即時串流':'離線分析';};
 $('stop').onclick=async()=>{if(!current)return;$('stop').disabled=true;try{const response=await fetch('/api/jobs/'+current+'/stop',{method:'POST'});if(!response.ok)throw Error('串流尚未就緒或已結束，請稍後重試');status('已要求停止；等待正在推論的窗完成。');}catch(e){status(e.message,true);$('stop').disabled=false;}};
 $('player').onerror=()=>{if($('player').currentSrc)status('瀏覽器無法播放此編碼；仍可嘗試交由後端解碼分析。',false)};
+renderCascade();
 fetch('/api/config').then(x=>x.json()).then(c=>{$('device').textContent='本機 Demo · '+c.device.toUpperCase()+(c.api_version>=2?' · 串流後端已就緒':' · 舊版後端');if(!(c.api_version>=2&&c.analysis_modes?.includes('stream')))status('偵測到舊版後端：串流需要關閉舊服務並重新啟動。頁面更新不代表 Python 服務已更新。',true);offlineLimits=c.limits;$('limits').textContent=c.limits;$('preprocessing-mode').value=c.default_preprocessing_mode||'official'}).catch(()=>status('無法連接本機服務。',true));loadHistory();
-</script></body></html>
+
+</script>
+</body>
+</html>
