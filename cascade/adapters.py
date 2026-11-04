@@ -24,6 +24,7 @@ class FrameDetectorAdapter:
         if batch_size<1:
             raise ValueError('Batch size must be positive')
         self.checkpoint=checkpoint_path.resolve()
+        self._resident: Any = None
         self.device,self.batch_size,self.warmup=device,batch_size,warmup
         if not self.checkpoint.is_file():
             raise FileNotFoundError(self.checkpoint)
@@ -59,13 +60,36 @@ class FrameDetectorAdapter:
         std=torch.tensor(self.config['std']).view(3,1,1)
         return (tensor-mean)/std
 
+    def open(self):
+        """Explicit session lifetime; offline callers retain per-call loading."""
+        import torch
+        if self._resident is not None:
+            return
+        device = torch.device(self.device)
+        model = load_model(self.name, self.config, self.checkpoint, device)
+        with torch.inference_mode():
+            if self.warmup:
+                dummy = torch.zeros(1, 3, self.config['resolution'], self.config['resolution'], device=device)
+                model({'image': dummy, 'label': torch.zeros(1, dtype=torch.long, device=device),
+                       'track_metrics': False}, inference=True)
+            if device.type == 'cuda':
+                torch.cuda.synchronize(device)
+        self._resident = model
+
+    def close(self):
+        import torch
+        self._resident = None
+        if torch.device(self.device).type == 'cuda':
+            torch.cuda.empty_cache()
+
     def infer(self, records: list[dict]):
         import torch
         start=time.perf_counter()
         device=torch.device(self.device)
         def synchronize():
             if device.type=='cuda':torch.cuda.synchronize(device)
-        model=load_model(self.name,self.config,self.checkpoint,device)
+        resident = self._resident is not None
+        model=self._resident if resident else load_model(self.name,self.config,self.checkpoint,device)
         synchronize()
         load_seconds=time.perf_counter()-start
         warmup_seconds=0.
@@ -75,7 +99,7 @@ class FrameDetectorAdapter:
         face_values: dict[str,list[float]]={r['video_name']:[] for r in records}
         try:
             with torch.inference_mode():
-                if self.warmup:
+                if self.warmup and not resident:
                     began=time.perf_counter()
                     dummy=torch.zeros(1,3,self.config['resolution'],self.config['resolution'],device=device)
                     model({'image':dummy,'label':torch.zeros(1,dtype=torch.long,device=device),
@@ -102,7 +126,7 @@ class FrameDetectorAdapter:
                         face_values[video_name].append(value)
         finally:
             del model
-            if device.type=='cuda':torch.cuda.empty_cache()
+            if device.type=='cuda' and not resident:torch.cuda.empty_cache()
         scores=accumulator.finalize()
         if any('face_groups' in r for r in records):
             grouped=[]

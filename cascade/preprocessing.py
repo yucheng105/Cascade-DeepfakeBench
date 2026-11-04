@@ -21,9 +21,9 @@ ASSET_LOCK=REPO_ROOT/'cascade/assets/preprocessing/assets.json'
 PROFILE_FOR_MODEL={'xception':'dlib81','ucf':'dlib81','sbi':'retinaface'}
 
 
-def atomic_json(path,value):
+def atomic_json(path,value,*,indent=2):
     temporary=path.with_suffix('.tmp')
-    temporary.write_text(json.dumps(value,ensure_ascii=False,indent=2,allow_nan=False)+'\n',encoding='utf-8')
+    temporary.write_text(json.dumps(value,ensure_ascii=False,indent=indent,allow_nan=False)+'\n',encoding='utf-8')
     # Windows scanners/readers can briefly hold a handle without FILE_SHARE_DELETE.
     for attempt in range(20):
         try:

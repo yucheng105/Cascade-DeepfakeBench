@@ -210,3 +210,6 @@ unlabeled upload has null evaluation metrics. See the sibling
 were reversed and a non-destructive prediction audit.
 
 Long videos: at most 32 frames are sampled uniformly over the entire video; brief manipulations can be missed. Decode time increases with video length; the existing 180-second decode/face-processing timeout and 200 MiB size limit still apply. This is not segmented detection.
+## 模擬即時串流
+
+本機 Demo 新增 MP4 原速逐窗分析；操作與語意見 [STREAMING.md](STREAMING.md)。

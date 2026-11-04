@@ -2,10 +2,12 @@
 import argparse
 import json
 import mimetypes
+import os
 from pathlib import Path
 import re
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import threading
+import time
 from urllib.parse import parse_qs, urlsplit
 import uuid
 import webbrowser
@@ -15,13 +17,28 @@ from .download_face_model import MODEL_PATH
 from .offline import write_json
 from .video import POLICIES, run_video
 from .video_input import VideoLimits
+from .streaming import StreamingSession, save_report
 
 PAGE = Path(__file__).resolve().parent/'demo.html'
 
 
+def read_json(path):
+    for attempt in range(20):
+        try:
+            return json.loads(path.read_text(encoding='utf-8'))
+        except PermissionError:
+            if attempt == 19:
+                raise
+            time.sleep(.01)
+
+
 class DemoState:
     def __init__(self, root: Path, device='cuda', face_model: Path = MODEL_PATH, runner=run_video,
-                 preprocessing_mode='official', profile_timeout=180, cache_max_bytes=512*1024*1024):
+                 preprocessing_mode='official', profile_timeout=180, cache_max_bytes=512*1024*1024,
+                 stream_factory=StreamingSession):
+        self.stream_factory = stream_factory
+        self.sessions: dict[str, StreamingSession] = {}
+        self.workers: list[threading.Thread] = []
         self.preprocessing_mode=preprocessing_mode
         self.profile_timeout=profile_timeout
         self.cache_max_bytes=cache_max_bytes
@@ -31,14 +48,27 @@ class DemoState:
         self.lock = threading.Lock()
         self.active: str | None = None
         self.jobs: dict[str, dict] = {}
-        for path in sorted(self.root.glob('*/job.json')):
+        for path in sorted(self.root.glob('*/job.json'), key=lambda p:p.stat().st_mtime):
             if not re.fullmatch('[0-9a-f]{32}', path.parent.name):
                 continue
             try:
                 job = json.loads(path.read_text(encoding='utf-8'))
                 job.update(id=path.parent.name, phase='failed', message='先前工作已中斷，請重新上傳')
                 result = path.parent/'result'
-                if (result/'report.json').is_file() and \
+                if job.get('analysis_mode') == 'stream' and (result/'report.json').is_file():
+                    report = json.loads((result/'report.json').read_text(encoding='utf-8'))
+                    phase = report.get('phase')
+                    if phase not in ('complete', 'stopped', 'failed'):
+                        phase = 'failed'
+                        report.update(phase='failed', message='服務重啟：先前串流已中斷，不自動續跑')
+                        for row in report.get('windows', []):
+                            if row['outcome'] in ('collecting', 'waiting', 'processing'):
+                                row.update(outcome='cancelled', reason='service_interrupted', decision=None)
+                        from .preprocessing import atomic_json
+                        save_report(result, report)
+                        atomic_json(result/'status.json', dict(phase='failed', message=report['message']))
+                    job.update(phase=phase, message=report.get('message','串流紀錄'), report=report)
+                elif (result/'report.json').is_file() and \
                         json.loads((result/'status.json').read_text(encoding='utf-8'))['phase'] == 'complete':
                     job.update(phase='complete', message='推論完成',
                                report=json.loads((result/'report.json').read_text(encoding='utf-8')))
@@ -48,7 +78,7 @@ class DemoState:
             except (OSError, ValueError, KeyError):
                 continue
 
-    def reserve(self, filename, policy, preprocessing_mode=None):
+    def reserve(self, filename, policy, preprocessing_mode=None, analysis_mode='offline'):
         with self.lock:
             if self.active is not None:
                 raise RuntimeError('已有影片正在處理，請等待完成後再上傳')
@@ -56,6 +86,7 @@ class DemoState:
             folder = self.root/job_id
             folder.mkdir(exist_ok=False)
             job = dict(id=job_id, filename=filename, policy=policy, preprocessing_mode=preprocessing_mode or self.preprocessing_mode, phase='uploading', message='接收影片')
+            job['analysis_mode'] = analysis_mode
             write_json(folder/'job.json', job)
             self.jobs[job_id] = job
             self.active = job_id
@@ -74,6 +105,13 @@ class DemoState:
     def snapshot(self, job_id):
         with self.lock:
             job=dict(self.jobs[job_id])
+            if job.get('analysis_mode') == 'stream' and (self.root/job_id/'result/report.json').is_file():
+                report = read_json(self.root/job_id/'result/report.json')
+                # Polling needs counts and traces; full per-frame geometry stays
+                # in the downloadable report, avoiding quadratic UI traffic.
+                report['windows'] = [dict(row, profiles={name:{k:v for k,v in profile.items() if k!='samples'}
+                    for name,profile in row.get('profiles',{}).items()}) for row in report['windows']]
+                job['report'] = report
             job['diagnostic_files']=[name for name in ('error.json','manifest.json','preprocessing.json','partial_trace.json')
                 if (self.root/job_id/'result'/name).is_file()]
             return job
@@ -82,6 +120,19 @@ class DemoState:
         def work():
             job = self.snapshot(job_id)
             try:
+                if job.get('analysis_mode') == 'stream':
+                    session = self.stream_factory(self.root/job_id/'input.mp4', self.root/job_id/'result',
+                        device=self.device, face_model=self.face_model,
+                        preprocessing_mode=job['preprocessing_mode'], profile_timeout=self.profile_timeout,
+                        cache_max_bytes=self.cache_max_bytes, original_filename=job['filename'],
+                        progress=lambda p,m:self.update(job_id,'finalizing' if p in ('complete','stopped','failed') else p,m))
+                    with self.lock:
+                        self.sessions[job_id] = session
+                    result = session.run()
+                    with self.lock:
+                        self.jobs[job_id].update(report=result, phase=result['phase'], message=result['message'])
+                        self.active = None
+                    return
                 result = self.runner(self.root/job_id/'input.mp4', self.root/job_id/'result',
                                      policy_path=POLICIES[job['policy']], device=self.device,
                                      face_model=self.face_model, allow_exploratory=True,
@@ -98,17 +149,48 @@ class DemoState:
                 with self.lock:
                     if self.active == job_id:
                         self.active = None
-        threading.Thread(target=work, daemon=True).start()
+                    self.sessions.pop(job_id, None)
+        thread = threading.Thread(target=work, daemon=True)
+        with self.lock:
+            self.workers = [t for t in self.workers if t.is_alive()]
+            self.workers.append(thread)
+        thread.start()
+
+    def stop(self, job_id):
+        with self.lock:
+            if job_id not in self.jobs:
+                return 404
+            session = self.sessions.get(job_id)
+            if session is None:
+                return 409
+            session.stop()
+            return 202
 
 
 class DemoServer(ThreadingHTTPServer):
     demo_state: DemoState
 
+    def server_close(self):
+        if not hasattr(self, 'demo_state'):
+            super().server_close()
+            return
+        with self.demo_state.lock:
+            sessions = list(self.demo_state.sessions.values())
+            workers = list(self.demo_state.workers)
+        for session in sessions:
+            session.stop()
+        for worker in workers:
+            # Active inference has a killable worker deadline. Session shutdown
+            # preserves results and releases child processes before exiting.
+            worker.join(self.demo_state.profile_timeout+5)
+        super().server_close()
+
 
 def make_server(root: Path, *, port=8765, device='cuda', face_model: Path = MODEL_PATH, runner=run_video,
-                preprocessing_mode='official',profile_timeout=180,cache_max_bytes=512*1024*1024):
+                preprocessing_mode='official',profile_timeout=180,cache_max_bytes=512*1024*1024,
+                stream_factory=StreamingSession):
     if preprocessing_mode not in ('official','legacy'):raise ValueError('Invalid preprocessing mode')
-    state = DemoState(root, device, face_model, runner,preprocessing_mode,profile_timeout,cache_max_bytes)
+    state = DemoState(root, device, face_model, runner,preprocessing_mode,profile_timeout,cache_max_bytes,stream_factory)
 
     class Handler(BaseHTTPRequestHandler):
         def local_request(self):
@@ -131,7 +213,21 @@ def make_server(root: Path, *, port=8765, device='cuda', face_model: Path = MODE
             if not path.is_file():
                 self.send_json(dict(error='檔案尚未產生'), 404)
                 return
-            size = path.stat().st_size
+            for attempt in range(20):
+                try:
+                    stream = path.open('rb')
+                    break
+                except PermissionError:
+                    if attempt == 19:
+                        raise
+                    time.sleep(.01)
+            with stream:
+                self.send_open_file(stream, path, mime)
+
+        def send_open_file(self, stream, path, mime):
+            # Header size and content must refer to the same opened version,
+            # even when a streaming report is atomically replaced meanwhile.
+            size = os.fstat(stream.fileno()).st_size
             start, end = 0, size-1
             requested = self.headers.get('Range')
             if requested:
@@ -158,15 +254,14 @@ def make_server(root: Path, *, port=8765, device='cuda', face_model: Path = MODE
             self.end_headers()
             if self.command == 'HEAD':
                 return
-            with path.open('rb') as stream:
-                stream.seek(start)
-                remaining = end-start+1
-                while remaining:
-                    block = stream.read(min(1024*1024, remaining))
-                    if not block:
-                        break
-                    self.wfile.write(block)
-                    remaining -= len(block)
+            stream.seek(start)
+            remaining = end-start+1
+            while remaining:
+                block = stream.read(min(1024*1024, remaining))
+                if not block:
+                    break
+                self.wfile.write(block)
+                remaining -= len(block)
 
         def do_HEAD(self):
             self.do_GET()
@@ -188,11 +283,11 @@ def make_server(root: Path, *, port=8765, device='cuda', face_model: Path = MODE
                                     limits=f'MP4 · ≤200 MiB · ≤{VideoLimits().max_seconds} 秒（{VideoLimits().max_seconds // 60} 分鐘） · ≤1920×1080 像素 · 最多 32 幀'))
             elif path == '/api/jobs':
                 with state.lock:
-                    self.send_json([dict(id=j['id'], filename=j['filename'], phase=j['phase'])
+                    self.send_json([dict(id=j['id'], filename=j['filename'], phase=j['phase'],analysis_mode=j.get('analysis_mode','offline'))
                                     for j in list(state.jobs.values())[-10:][::-1]])
             else:
                 match = re.fullmatch(r'/api/jobs/([0-9a-f]{32})', path)
-                file_match = re.fullmatch(r'/jobs/([0-9a-f]{32})/(input\.mp4|report\.json|manifest\.json|preprocessing\.json|partial_trace\.json|error\.json|decisions\.csv|trace\.csv|frames/\d{8}\.png|profiles/(?:dlib81|retinaface|yunet_legacy)/(?:\d{8}_\d{4}\.png|partial\.json|result\.json|worker_error\.json))', path)
+                file_match = re.fullmatch(r'/jobs/([0-9a-f]{32})/(input\.mp4|report\.json|manifest\.json|windows\.csv|preprocessing\.json|partial_trace\.json|error\.json|decisions\.csv|trace\.csv|frames/\d{8}\.png|profiles/(?:dlib81|retinaface|yunet_legacy)/(?:\d{8}_\d{4}\.png|partial\.json|result\.json|worker_error\.json))', path)
                 if match and match[1] in state.jobs:
                     self.send_json(state.snapshot(match[1]))
                 elif file_match and file_match[1] in state.jobs:
@@ -209,6 +304,11 @@ def make_server(root: Path, *, port=8765, device='cuda', face_model: Path = MODE
                 self.send_json(dict(error='Local requests only'), 403)
                 return
             parsed = urlsplit(self.path)
+            stop_match = re.fullmatch(r'/api/jobs/([0-9a-f]{32})/stop', parsed.path)
+            if stop_match:
+                code = state.stop(stop_match[1])
+                self.send_json(dict(status='stop_requested' if code == 202 else 'not_active'), code)
+                return
             if parsed.path != '/api/jobs':
                 self.send_json(dict(error='Not found'), 404)
                 return
@@ -216,16 +316,18 @@ def make_server(root: Path, *, port=8765, device='cuda', face_model: Path = MODE
             filename = query.get('filename', [''])[0].replace('\\', '/').rsplit('/', 1)[-1]
             policy = query.get('policy', ['early'])[0]
             mode=query.get('preprocessing_mode',[state.preprocessing_mode])[0]
+            analysis_mode = query.get('analysis_mode', ['offline'])[0]
             try:
                 length = int(self.headers.get('Content-Length', '0'))
             except ValueError:
                 length = 0
             if not filename.lower().endswith('.mp4') or len(filename) > 180 or policy not in POLICIES or mode not in ('official','legacy') or \
+                    analysis_mode not in ('offline','stream') or (analysis_mode == 'stream' and policy != 'early') or \
                     query.get('exploratory') != ['true'] or not 0 < length <= VideoLimits().max_bytes:
                 self.send_json(dict(error='需有效 MP4、大小 ≤200 MiB，並確認探索模式'), 400)
                 return
             try:
-                job_id = state.reserve(filename, policy,mode)
+                job_id = state.reserve(filename, policy,mode,analysis_mode)
             except RuntimeError as error:
                 self.send_json(dict(error=str(error)), 409)
                 return
@@ -266,7 +368,7 @@ def main(argv=None):
     server = make_server(args.runs_root, port=args.port, device=args.device, face_model=args.face_model,
                          preprocessing_mode=args.preprocessing_mode,profile_timeout=args.profile_timeout,cache_max_bytes=args.cache_mib*1024*1024)
     address = f'http://127.0.0.1:{server.server_port}'
-    print('CASCAde Offline Demo: '+address, flush=True)
+    print('CASCAde Video + Streaming Demo: '+address, flush=True)
     if args.open_browser:
         webbrowser.open(address)
     try:
