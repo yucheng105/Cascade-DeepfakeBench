@@ -131,7 +131,7 @@ def export_cohort(spec: dict, output: Path, *, mode='crops', unit='video', devic
                             source_frames=[dict(frame_index=s['frame_index'],timestamp_seconds=s['timestamp_seconds'],
                                 raw_pixels_sha256=hashlib.sha256(s['image'].tobytes()).hexdigest()) for s in admitted])
                         if window_contract_version==2:
-                            sample.update(window_contract_version=2,window_id=window['window_id'],
+                            sample.update(window_contract_version=2,window_id=window['window_id'],tail=window['tail'],
                                 observed_end_seconds=window['observed_end_seconds'],nominal_end_seconds=window['nominal_end_seconds'],
                                 source_frames=[frame_evidence(s) for s in admitted])
                         samples.append(sample)

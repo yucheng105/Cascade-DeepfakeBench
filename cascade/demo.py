@@ -74,6 +74,8 @@ class DemoState:
                     if phase not in ('complete', 'stopped', 'failed'):
                         phase = 'failed'
                         report.update(phase='failed', message='服務重啟：先前串流已中斷，不自動續跑')
+                        if report.get('trace_schema_version')==1:
+                            report['operational_failure']=dict(kind='service_interrupted',reason=report['message'])
                         for row in report.get('windows', []):
                             if row['outcome'] in ('collecting', 'waiting', 'processing'):
                                 row.update(outcome='cancelled', reason='service_interrupted', decision=None)
@@ -145,8 +147,11 @@ class DemoState:
                         for name,profile in row.get('profiles',{}).items()}) for row in report['windows']]
                     self.report_cache=(key,report)
                 job['report'] = self.report_cache[1]
-            job['diagnostic_files']=[name for name in ('error.json','manifest.json','preprocessing.json','partial_trace.json')
+            job['diagnostic_files']=[name for name in ('error.json','manifest.json','preprocessing.json','partial_trace.json','partial_explanation.json','explanation.csv')
                 if (self.root/job_id/'result'/name).is_file()]
+            partial=self.root/job_id/'result/partial_explanation.json'
+            if partial.is_file():
+                job['explanation']=read_json(partial)
             return job
 
     def start(self, job_id):
@@ -335,7 +340,7 @@ def make_server(root: Path, *, port=8765, device='cuda', face_model: Path = MODE
                                     for j in list(state.jobs.values())[-10:][::-1]])
             else:
                 match = re.fullmatch(r'/api/jobs/([0-9a-f]{32})', path)
-                file_match = re.fullmatch(r'/jobs/([0-9a-f]{32})/(input\.mp4|report\.json|manifest\.json|windows\.csv|preprocessing\.json|partial_trace\.json|error\.json|decisions\.csv|trace\.csv|frames/\d{8}\.png|profiles/(?:dlib81|retinaface|yunet_legacy)/(?:\d{8}_\d{4}\.png|partial\.json|result\.json|worker_error\.json))', path)
+                file_match = re.fullmatch(r'/jobs/([0-9a-f]{32})/(input\.mp4|report\.json|manifest\.json|windows\.csv|preprocessing\.json|partial_trace\.json|partial_explanation\.json|explanation\.csv|error\.json|decisions\.csv|trace\.csv|frames/\d{8}\.png|profiles/(?:dlib81|retinaface|yunet_legacy)/(?:\d{8}_\d{4}\.png|partial\.json|result\.json|worker_error\.json))', path)
                 if match and match[1] in state.jobs:
                     self.send_json(state.snapshot(match[1]))
                 elif file_match and file_match[1] in state.jobs:

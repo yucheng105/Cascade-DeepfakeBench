@@ -130,3 +130,23 @@ test('API v2 never shows Phase 3 ready; startup and submit share the capability 
   assert.equal(current.run("supportsWindowMode({api_version:3,analysis_modes:['offline_window']},'offline_window')"),true);
   assert.equal(current.run("supportsWindowMode({api_version:3,analysis_modes:['stream']},'offline_window')"),false);
 });
+
+test('versioned explanations render null scores and known or unknown failures without a fabricated score',()=>{
+  const p=page();p.ctx.x={stages:[{stage:1,detector:'ucf',score:null,execution_status:'unable_to_decide',reason:'no_valid_faces'}]};
+  p.run('renderCascade([],x.stages,true,x)');
+  assert.match(p.el('cascade-path').textContent,/UCF.*無法判定/);
+  assert.doesNotMatch(p.el('cascade-path').textContent,/Fake score|0\.0000/);
+  p.ctx.x.stages[0].execution_status='unreported';p.run('renderCascade([],x.stages,true,x)');
+  assert.match(p.el('cascade-path').textContent,/執行位置未回報/);
+});
+
+test('partial failure shows retained scored stages without inheriting a prior verdict',()=>{
+  const p=page();p.ctx.job={id:'failed',diagnostic_files:[],explanation:{observation_outcome:'failed',stages:[
+    {stage:1,detector:'xception',execution_status:'scored',score:.6,route_reason:'continue_between'},
+    {stage:2,detector:'ucf',execution_status:'failed',score:null,reason:'model error'},
+    {stage:3,detector:'sbi',execution_status:'not_executed',score:null,reason:'upstream_failure'}]}};
+  p.run('showFailure(job)');
+  assert.match(p.el('cascade-path').textContent,/0\.6000.*續傳/);
+  assert.match(p.el('cascade-path').textContent,/UCF.*失敗/);
+  assert.match(p.el('cascade-path').textContent,/SBI.*前關無法完成.*未執行/);
+});

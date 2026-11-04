@@ -16,6 +16,7 @@ import cv2
 
 from .model_loader import REPO_ROOT,sha256
 from .video_input import VideoLimits,prepare_video,MODEL_PATH
+from .explanation import NoFaceEvidence
 
 ASSET_LOCK=REPO_ROOT/'cascade/assets/preprocessing/assets.json'
 PROFILE_FOR_MODEL={'xception':'dlib81','ucf':'dlib81','sbi':'retinaface'}
@@ -182,7 +183,7 @@ class ProfileCache:
                 cache_remaining_bytes=self.limit-self.used_bytes),self.timeout)
             self.used_bytes+=result['cache_bytes']
             state['result']=result
-            if not result['valid_face_frames']:raise ValueError('Reached profile has no valid faces: '+name)
+            if not result['valid_face_frames']:raise NoFaceEvidence('Reached profile has no valid faces: '+name)
             state.update(state='used',result=result)
             self.save();return result
         except Exception as error:

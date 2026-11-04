@@ -13,6 +13,7 @@ from .offline import DEFAULT_CONFIGS, source_state, write_csv, write_json
 from .policy import validate_policy, validate_runtime_input, validate_runtime_bindings
 from .video_input import SAMPLING, VideoLimits
 from .preprocessing import ProfileCache, atomic_json, PROFILE_FOR_MODEL
+from .explanation import context_for, explain, write_explanation_csv
 
 POLICIES = {name: REPO_ROOT/'cascade/policies'/f'uploaded_video_{name}.json'
             for name in ('early', 'all_stages')}
@@ -98,26 +99,49 @@ def run_video(video: Path, output: Path, *, policy_path: Path | None = None,
         manifest.update(preprocessing=cache.summary(),models={n:a.provenance for n,a in adapters.items()})
         atomic_json(output/'manifest.json',manifest)
         record = dict(video_name='upload_'+input_hash, label=None)
+        def explanation_context():
+            summary=cache.summary()
+            samples=summary.get('raw',{}).get('samples',summary.get('samples'))
+            frames=[{**{k:v for k,v in s.items() if k in ('frame_index','timestamp_seconds','sha256')},
+                     'timestamp_basis':'frame_index_over_fps'} for s in samples] if samples is not None else None
+            profiles={p:dict(state=s.get('state','unrecorded'),**{k:v for k,v in s.get('result',{}).items() if k!='state'})
+                      for p,s in summary.get('profiles',{}).items()}
+            context=context_for(policy,dict(record,source_id=input_hash,source_frames=frames),unit='video',
+                profiles=profiles,models=manifest.get('models'),input_contract=input_contract,
+                input_sha256=input_hash,rule_version=None)
+            context['policy_sha256']=manifest['policy_sha256']
+            return context
 
         class ReportingAdapter:
             def __init__(self, name, adapter):
                 self.name, self.adapter = name, adapter
 
             def infer(self, records):
-                prepared=cache.get(self.name)
+                try:prepared=cache.get(self.name)
+                except Exception as error:
+                    error.execution_phase='preprocessing'
+                    raise
                 manifest['preprocessing']=cache.summary()
                 atomic_json(output/'manifest.json',manifest)
                 groups=prepared['face_groups']
                 enriched=[dict(r,frames=[p for g in groups for p in g['faces']],face_groups=groups) for r in records]
                 update('inference', '推論：'+self.name.upper())
-                return self.adapter.infer(enriched)
+                try:return self.adapter.infer(enriched)
+                except Exception as error:
+                    error.execution_phase='inference_call'
+                    raise
 
         partial_trace: list[dict]=[]
+        execution_snapshot: dict={}
         def record_trace(rows):
             partial_trace[:]=rows
             atomic_json(output/'partial_trace.json',rows)
+        def record_execution(evidence):
+            execution_snapshot.update(evidence)
+            x=explain(policy,evidence['trace'],evidence['execution_events'],explanation_context(),outcome='processing')
+            atomic_json(output/'partial_explanation.json',x)
         result = run_cascade([record], policy,
-                             {n:ReportingAdapter(n, a) for n,a in adapters.items()}, on_trace=record_trace)
+                             {n:ReportingAdapter(n, a) for n,a in adapters.items()}, on_trace=record_trace,on_execution=record_execution)
         preprocessing=cache.summary()
         manifest['preprocessing']=preprocessing
         atomic_json(output/'manifest.json',manifest)
@@ -130,12 +154,22 @@ def run_video(video: Path, output: Path, *, policy_path: Path | None = None,
                                         forward='synchronized model calls only; excludes model load, warmup, decode and H2D'))
         if any(p.get('state')=='used' and p['result']['valid_face_frames'] < preprocessing['sampled_frame_count'] for p in preprocessing['profiles'].values()):
             result['warnings'].append('部分抽樣影格沒有有效人臉；判定僅涵蓋成功處理的影格。')
+        result['explanation']=explain(policy,result['trace'],result['execution_events'],explanation_context(),outcome='decided')
         write_json(output/'report.json', result)
+        write_explanation_csv(output/'explanation.csv',[result['explanation']])
         write_csv(output/'decisions.csv', list(result['decisions'][0]), result['decisions'])
         write_csv(output/'trace.csv', list(result['trace'][0]), result['trace'])
         update('complete', '推論完成')
         return result
     except Exception as error:
+        if 'record' in locals():
+            evidence=getattr(error,'cascade_evidence',locals().get('result',dict(execution_snapshot,trace=partial_trace)))
+            accepted='result' in locals() and bool(result.get('decisions'))
+            x=explain(policy,evidence.get('trace',[]),evidence.get('execution_events',[]),explanation_context(),
+                outcome='decided' if accepted else getattr(error,'execution_outcome','failed'),reason=str(error),
+                operational_failure=dict(kind='persistence_or_postprocessing' if accepted else 'analysis',reason=str(error)))
+            atomic_json(output/'partial_explanation.json',x)
+            write_explanation_csv(output/'explanation.csv',[x])
         if 'manifest' in locals():
             if 'cache' in locals():manifest['preprocessing']=cache.summary()
             manifest['failure']=str(error)

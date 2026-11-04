@@ -27,13 +27,14 @@ from .preprocessing import atomic_json
 from .video_input import VideoLimits
 from .download_face_model import MODEL_PATH
 from .performance import counter, observe, summarize, window_timing, rss
+from .explanation import NoFaceEvidence, annotate_windows, write_explanation_csv
 
 
 class StreamStopped(Exception):
     pass
 
 
-class NoFaces(Exception):
+class NoFaces(NoFaceEvidence):
     pass
 
 
@@ -62,6 +63,7 @@ def reuse_retina_priors(model):
 
 
 def save_report(output, report):
+    annotate_windows(report)
     summarize(report)
     rows = report['windows']
     decided = [r for r in rows if r['outcome']=='decided']
@@ -80,6 +82,8 @@ def save_report(output, report):
     if budget is not None and report.get('phase')=='failed':
         budget += report['resource_budget']['failure_report_reserve_bytes']
     atomic_json(output/'report.json', report, indent=None,max_bytes=budget)
+    if report.get('trace_schema_version')==1:
+        write_explanation_csv(output/'explanation.csv',[w['explanation'] for w in rows if 'explanation' in w])
     temporary = output/'windows.tmp'
     columns = ['index','start_seconds','end_seconds','outcome','decision','score','exit_stage',
                'planned_samples','latency_seconds','reason']
@@ -317,11 +321,17 @@ class OfficialWindowEngine:
                     self.name = name
                 def infer(self, records):
                     prepared_started = time.perf_counter()
-                    groups = prepare(self.name)
+                    try:groups = prepare(self.name)
+                    except Exception as error:
+                        error.execution_phase='preprocessing'
+                        raise
                     prepare_seconds = time.perf_counter()-prepared_started
                     enriched = [dict(r, frames=[p for g in groups for p in g['faces']], face_groups=groups)
                                 for r in records]
-                    scores,timing = engine.adapters[self.name].infer(enriched)
+                    try:scores,timing = engine.adapters[self.name].infer(enriched)
+                    except Exception as error:
+                        error.execution_phase='inference_call'
+                        raise
                     timing['prepare_seconds'] = prepare_seconds
                     return scores,timing
 
@@ -343,13 +353,14 @@ class OfficialWindowEngine:
                     self.policy, {n:ReachedAdapter(n) for n in self.adapters}, on_trace=lambda rows:trace.__setitem__(slice(None),rows))
                 decision = result['decisions'][0]
                 outcome = dict(outcome='decided', decision=decision['decision'], score=decision['score'],
-                    exit_stage=decision['exit_stage'], trace=result['trace'], stages=result['stages'])
+                    exit_stage=decision['exit_stage'], trace=result['trace'], stages=result['stages'],execution_events=result['execution_events'])
             except NoFaces as error:
                 outcome = dict(outcome='unable_to_decide', decision=None, score=None, exit_stage=None,
-                               reason=str(error), trace=trace, stages=[])
+                               reason=str(error), trace=trace, stages=[],execution_events=getattr(error,'cascade_evidence',{}).get('execution_events',[]))
             except Exception as error:
                 # Preserve partial profile/trace evidence across the RPC failure.
-                error.streaming_evidence = dict(profiles=profile_results, trace=trace)  # type: ignore[attr-defined]
+                error.streaming_evidence = dict(profiles=profile_results, trace=trace,
+                    execution_events=getattr(error,'cascade_evidence',{}).get('execution_events',[]))  # type: ignore[attr-defined]
                 raise
         outcome.update(profiles=profile_results, planned_samples=len(window['samples']), label=None,
                        processing_seconds=time.perf_counter()-began, active_cache_peak_bytes=used,
@@ -540,6 +551,7 @@ class StreamingSession:
         self.failure: Exception | None = None
         self.started = 0.
         self.report: dict[str, Any] = dict(schema_version=4, window_contract_version=self.version, analysis_mode=analysis_mode, phase='starting',
+            trace_schema_version=1,
             session_id=uuid.uuid4().hex,source_id=None,observed_horizon_seconds=0.,
             policy=selected,policy_sha256=policy_hash,input_contract=actual,
             original_filename=original_filename or video.name, ground_truth=None, deployment_ready=False,
@@ -577,6 +589,7 @@ class StreamingSession:
     def _save(self):
         """Called under the condition lock; artifacts precede observable status."""
         from .temporal import TERMINAL
+        self.report['operational_failure']=dict(kind='session_failure',reason=str(self.failure)) if self.failure else None
         for row in self.rows:
             if row['outcome'] in TERMINAL and row['window_id'] not in self.aggregate_ids:
                 self.aggregate.update(row)
@@ -600,7 +613,7 @@ class StreamingSession:
             raise
         observe(self.report['performance']['persistence'],time.perf_counter()-began)
         self.report['performance']['persistence']['bytes_written_total'] += sum(
-            (self.output/name).stat().st_size for name in ('report.json','windows.csv'))
+            (self.output/name).stat().st_size for name in ('report.json','windows.csv','explanation.csv'))
         self.last_progress_save=time.monotonic()
         self.report['performance']['last_report_bytes']=(self.output/'report.json').stat().st_size
 
@@ -700,7 +713,7 @@ class StreamingSession:
                 with self.condition:
                     if row['outcome']=='processing':
                         row.update(outcome='failed', reason=str(error), decision=None,
-                                   evidence=getattr(error, 'streaming_evidence', {}))
+                                   evidence=getattr(error, 'streaming_evidence',getattr(error,'cascade_evidence',{})))
                     self.failure = error
                     self._save()
                     self.condition.notify_all()

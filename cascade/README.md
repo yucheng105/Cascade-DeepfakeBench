@@ -1,5 +1,7 @@
 # Cascade pipeline
 
+Versioned execution explanations and partial-result exports: [EXPLAINABILITY.md](EXPLAINABILITY.md).
+
 Complete offline score export and selected streaming policies are documented in
 [SCORE_ARTIFACT.md](SCORE_ARTIFACT.md). The analysis repository consumes those
 artifacts without importing runtime model code. Policy search stays offline.

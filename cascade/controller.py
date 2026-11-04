@@ -7,9 +7,10 @@ import time
 from .metrics import final_classification_metrics
 from .policy import validate_policy
 from .video_scoring import route_video_scores, route_final_stage, UNCERTAIN
+from .explanation import route_reason
 
 
-def run_cascade(records: list[dict], policy: dict, adapters: dict, *, on_trace=None) -> dict:
+def run_cascade(records: list[dict], policy: dict, adapters: dict, *, on_trace=None, on_execution=None) -> dict:
     started=time.perf_counter()
     dataset_id=policy.get('dataset_id')
     if not isinstance(dataset_id,str):
@@ -24,25 +25,41 @@ def run_cascade(records: list[dict], policy: dict, adapters: dict, *, on_trace=N
     if any(labeled) and not all(labeled):
         raise ValueError('Cohort must be fully labeled or fully unknown; do not mix evaluation roles')
     final={}
-    trace=[]
+    trace: list[dict]=[]
     summaries=[]
     reached=list(records)
+    execution_events: list[dict]=[]
+    def publish():
+        if on_execution is not None:
+            on_execution(dict(trace=list(trace),execution_events=[dict(e) for e in execution_events]))
     # Pure boundary functions are shared with the existing two-stage implementation.
     for index,stage in enumerate(policy['stages']):
         names={r['video_name'] for r in reached}
         timing={}
         if reached:
-            scores,timing=adapters[stage['detector']].infer(reached)
-            scores=tuple(scores)
-            if len(scores)!=len(names) or {s.video_name for s in scores}!=names:
-                raise ValueError('Adapter output cohort must exactly match reached videos')
-            for s in scores:
-                if s.label!=identities[s.video_name]['label']:
-                    raise ValueError('Adapter label changed')
-                if not math.isfinite(s.score) or not 0<=s.score<=1 or s.frame_count<1:
-                    raise ValueError('Invalid adapter score or frame count')
-            routed=(route_final_stage(scores,stage['low']) if index==len(policy['stages'])-1
-                    else route_video_scores(scores,stage['low'],stage['high']))
+            event=dict(stage=index+1,detector=stage['detector'],sample_ids=sorted(names),status='entered',
+                       phase='adapter_call',reason=None)
+            execution_events.append(event);publish()
+            try:
+                scores,timing=adapters[stage['detector']].infer(reached)
+                event['phase']='score_validation'
+                scores=tuple(scores)
+                if len(scores)!=len(names) or {s.video_name for s in scores}!=names:
+                    raise ValueError('Adapter output cohort must exactly match reached videos')
+                for s in scores:
+                    if s.label!=identities[s.video_name]['label']:
+                        raise ValueError('Adapter label changed')
+                    if not math.isfinite(s.score) or not 0<=s.score<=1 or s.frame_count<1:
+                        raise ValueError('Invalid adapter score or frame count')
+                routed=(route_final_stage(scores,stage['low']) if index==len(policy['stages'])-1
+                        else route_video_scores(scores,stage['low'],stage['high']))
+            except Exception as error:
+                event.update(status=getattr(error,'execution_outcome','failed'),
+                             phase=getattr(error,'execution_phase',event['phase']),reason=str(error))
+                setattr(error,'cascade_evidence',dict(trace=list(trace),execution_events=[dict(e) for e in execution_events]))
+                publish()
+                raise
+            event.update(status='scored',phase='valid_score_returned')
         else:
             routed=()
         uncertain=set()
@@ -50,6 +67,7 @@ def run_cascade(records: list[dict], policy: dict, adapters: dict, *, on_trace=N
             trace.append(dict(video_name=s.video_name,label=s.label,stage=index+1,
                               detector=stage['detector'],score=s.score,frames=s.frame_count,
                               decision=s.decision,low=stage['low'],high=stage['high'],
+                              route_reason=route_reason(s.score,stage,index==len(policy['stages'])-1),
                               allocated_forward_ms=timing.get('per_video_forward_ms',{}).get(s.video_name)))
             if on_trace is not None:on_trace(list(trace))
             if s.decision==UNCERTAIN:
@@ -62,6 +80,7 @@ def run_cascade(records: list[dict], policy: dict, adapters: dict, *, on_trace=N
                               exited=len(routed)-len(uncertain),uncertain=len(uncertain),
                               timing=timing,model_loaded=bool(names)))
         reached=[r for r in reached if r['video_name'] in uncertain]
+        publish()
     if reached or set(final)!=set(identities):
         raise ValueError('Terminal stage must decide every original video')
     videos=[final[r['video_name']][0] for r in records]
@@ -78,6 +97,6 @@ def run_cascade(records: list[dict], policy: dict, adapters: dict, *, on_trace=N
     return dict(decisions=[dict(video_name=v.video_name,label=v.label,prediction=int(v.decision=='FAKE'),
                                 decision=v.decision,exit_stage=final[v.video_name][1],score=v.score,
                                 frame_count=v.frame_count) for v in videos],
-                trace=trace,stages=summaries,metrics=metrics,
+                trace_schema_version=1,trace=trace,execution_events=execution_events,stages=summaries,metrics=metrics,
                 metric_definition='fake_positive_far_is_fnr',
                 controller_seconds=time.perf_counter()-started)
