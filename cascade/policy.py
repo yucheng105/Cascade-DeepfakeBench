@@ -14,6 +14,33 @@ FACE_PROFILES = ('preprocessed_face_crops', 'dlib81', 'retinaface', 'yunet_legac
 AGGREGATIONS = ('mean_frame_probability', 'max_face_then_mean_frame')
 
 
+def execution_contract(names, *, unit='video', mode='official', max_frames=32,
+                       window_seconds=4., sample_hz=2.) -> dict:
+    profiles = {'xception':'dlib81','ucf':'dlib81','sbi':'retinaface'}
+    value = dict(unit=unit, profiles={n:('preprocessed_face_crops' if mode=='crops' else
+        profiles[n] if mode=='official' else 'yunet_legacy') for n in names},
+        aggregation={n:'mean_frame_probability' if mode=='crops' else 'max_face_then_mean_frame' for n in names})
+    if unit == 'video':
+        value.update(sampling='first_N_numeric_sorted_frames' if mode=='crops' else 'uniform_unique_frame_indices_v1',max_frames=max_frames)
+    else:
+        value.update(sampling='paced_media_time_no_future_frames',window_seconds=window_seconds,
+                     stride_seconds=window_seconds,sample_hz=sample_hz)
+    _validate_input_contract(value,list(names))
+    return value
+
+
+def frozen_policy(value=None, *, path=None) -> tuple[dict, str]:
+    import hashlib
+    import json
+    from .video import POLICIES
+    if value is not None and path is not None:
+        raise ValueError('Choose policy content or policy_path, not both')
+    if value is None:
+        value=json.loads((path or POLICIES['early']).read_text(encoding='utf-8-sig'))
+    result=validate_policy(value,'uploaded_video',allow_exploratory=True)
+    return result,hashlib.sha256(json.dumps(result,sort_keys=True,separators=(',',':'),allow_nan=False).encode()).hexdigest()
+
+
 def _finite_number(value, field: str, *, probability: bool = False) -> None:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(f'{field} must be a finite number')
@@ -56,6 +83,12 @@ def _validate_metadata(value: dict, names: list[str]) -> None:
     if 'deployment_ready' in value and type(value['deployment_ready']) is not bool:
         raise ValueError('deployment_ready must be a boolean')
     formal = value.get('deployment_ready') is True
+    if formal and (value.get('research_only') is True or value.get('estimator', 'sample_replay') != 'sample_replay'):
+        raise ValueError('Research estimators cannot declare deployment_ready')
+    if formal and (value.get('promotion_status') == 'requires_independent_review' or
+                   'unverified' in str(value.get('split_status','')).lower() or
+                   (isinstance(value.get('validation'),dict) and value['validation'].get('evaluation_meets_target') is False)):
+        raise ValueError('Independent validation incomplete; cannot declare deployment_ready')
     required = ('target_far', 'latency_model', 'input_contract', *HASH_BINDINGS)
     if formal:
         for field in required:

@@ -19,6 +19,7 @@ from .offline import write_json
 from .video import POLICIES, run_video
 from .video_input import VideoLimits
 from .streaming import StreamingSession, save_report
+from .policy import frozen_policy, execution_contract, validate_runtime_input
 
 PAGE = Path(__file__).resolve().parent/'demo.html'
 
@@ -36,8 +37,13 @@ def read_json(path):
 class DemoState:
     def __init__(self, root: Path, device='cuda', face_model: Path = MODEL_PATH, runner=run_video,
                  preprocessing_mode='official', profile_timeout=180, cache_max_bytes=512*1024*1024,
-                 stream_factory=StreamingSession):
+                 stream_factory=StreamingSession, stream_policies=None):
         self.stream_factory = stream_factory
+        self.stream_policies = {'early':frozen_policy(path=POLICIES['early'])[0]}
+        for name,value in (stream_policies or {}).items():
+            if not re.fullmatch('[A-Za-z0-9_-]+',name):raise ValueError('Invalid registered policy name')
+            self.stream_policies[name] = frozen_policy(value if isinstance(value,dict) else None,
+                path=None if isinstance(value,dict) else Path(value))[0]
         self.sessions: dict[str, StreamingSession] = {}
         self.server_started = time.time()
         from .model_loader import sha256
@@ -86,11 +92,18 @@ class DemoState:
         with self.lock:
             if self.active is not None:
                 raise RuntimeError('已有影片正在處理，請等待完成後再上傳')
+            selected = None
+            if analysis_mode=='stream':
+                selected,policy_hash=frozen_policy(self.stream_policies[policy])
+                validate_runtime_input(selected,execution_contract([s['detector'] for s in selected['stages']],
+                    unit='window',mode=preprocessing_mode or self.preprocessing_mode))
             job_id = uuid.uuid4().hex
             folder = self.root/job_id
             folder.mkdir(exist_ok=False)
             job = dict(id=job_id, filename=filename, policy=policy, preprocessing_mode=preprocessing_mode or self.preprocessing_mode, phase='uploading', message='接收影片')
             job['analysis_mode'] = analysis_mode
+            if selected is not None:
+                job.update(stream_policy=selected,policy_sha256=policy_hash,policy_id=selected['policy_id'])
             write_json(folder/'job.json', job)
             self.jobs[job_id] = job
             self.active = job_id
@@ -126,6 +139,7 @@ class DemoState:
             try:
                 if job.get('analysis_mode') == 'stream':
                     session = self.stream_factory(self.root/job_id/'input.mp4', self.root/job_id/'result',
+                        policy=job['stream_policy'],
                         device=self.device, face_model=self.face_model,
                         preprocessing_mode=job['preprocessing_mode'], profile_timeout=self.profile_timeout,
                         cache_max_bytes=self.cache_max_bytes, original_filename=job['filename'],
@@ -200,9 +214,9 @@ class DemoServer(ThreadingHTTPServer):
 
 def make_server(root: Path, *, port=8765, device='cuda', face_model: Path = MODEL_PATH, runner=run_video,
                 preprocessing_mode='official',profile_timeout=180,cache_max_bytes=512*1024*1024,
-                stream_factory=StreamingSession):
+                stream_factory=StreamingSession, stream_policies=None):
     if preprocessing_mode not in ('official','legacy'):raise ValueError('Invalid preprocessing mode')
-    state = DemoState(root, device, face_model, runner,preprocessing_mode,profile_timeout,cache_max_bytes,stream_factory)
+    state = DemoState(root, device, face_model, runner,preprocessing_mode,profile_timeout,cache_max_bytes,stream_factory,stream_policies)
 
     class Handler(BaseHTTPRequestHandler):
         def local_request(self):
@@ -291,6 +305,8 @@ def make_server(root: Path, *, port=8765, device='cuda', face_model: Path = MODE
                 self.end_headers()
             elif path == '/api/config':
                 self.send_json(dict(api_version=2, analysis_modes=['offline','stream'],
+                                    stream_policies=[dict(name=n,policy_id=p['policy_id'],
+                                        order=[s['detector'] for s in p['stages']]) for n,p in state.stream_policies.items()],
                                     server_pid=os.getpid(), server_started=state.server_started,
                                     server_build=state.server_build,
                                     device=state.device, max_bytes=VideoLimits().max_bytes,
@@ -336,8 +352,9 @@ def make_server(root: Path, *, port=8765, device='cuda', face_model: Path = MODE
                 length = int(self.headers.get('Content-Length', '0'))
             except ValueError:
                 length = 0
-            if not filename.lower().endswith('.mp4') or len(filename) > 180 or policy not in POLICIES or mode not in ('official','legacy') or \
-                    analysis_mode not in ('offline','stream') or (analysis_mode == 'stream' and policy != 'early') or \
+            catalog = state.stream_policies if analysis_mode=='stream' else POLICIES
+            if not filename.lower().endswith('.mp4') or len(filename) > 180 or policy not in catalog or mode not in ('official','legacy') or \
+                    analysis_mode not in ('offline','stream') or \
                     query.get('exploratory') != ['true'] or not 0 < length <= VideoLimits().max_bytes:
                 self.send_json(dict(error='需有效 MP4、大小 ≤200 MiB，並確認探索模式'), 400)
                 return
@@ -345,6 +362,9 @@ def make_server(root: Path, *, port=8765, device='cuda', face_model: Path = MODE
                 job_id = state.reserve(filename, policy,mode,analysis_mode)
             except RuntimeError as error:
                 self.send_json(dict(error=str(error)), 409)
+                return
+            except ValueError as error:
+                self.send_json(dict(error=str(error)),400)
                 return
             try:
                 self.connection.settimeout(60)
@@ -379,9 +399,16 @@ def main(argv=None):
     parser.add_argument('--preprocessing-mode',choices=('official','legacy'),default='official')
     parser.add_argument('--profile-timeout',type=float,default=180)
     parser.add_argument('--cache-mib',type=int,default=512)
+    parser.add_argument('--stream-policy',action='append',default=[],metavar='NAME=JSON',help='Register a frozen streaming policy in the local UI')
     args = parser.parse_args(argv)
+    registered={}
+    for item in args.stream_policy:
+        name,sep,path=item.partition('=')
+        if not sep or not path or name in registered:parser.error('Use unique NAME=JSON policy registrations')
+        registered[name]=Path(path)
     server = make_server(args.runs_root, port=args.port, device=args.device, face_model=args.face_model,
-                         preprocessing_mode=args.preprocessing_mode,profile_timeout=args.profile_timeout,cache_max_bytes=args.cache_mib*1024*1024)
+                         preprocessing_mode=args.preprocessing_mode,profile_timeout=args.profile_timeout,cache_max_bytes=args.cache_mib*1024*1024,
+                         stream_policies=registered)
     address = f'http://127.0.0.1:{server.server_port}'
     print('CASCAde Video + Streaming Demo: '+address, flush=True)
     if args.open_browser:

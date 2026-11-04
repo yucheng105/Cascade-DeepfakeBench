@@ -3,8 +3,9 @@
 This contract checks execution compatibility. It does not certify population FAR,
 independent evaluation, dataset lineage or the provenance of a supplied hash.
 Existing bundled policies remain uncalibrated and `deployment_ready=false`.
-Phase 2 supplies score export, split/evaluation evidence and optimizer integration;
-this change does not manufacture a deployment-ready policy.
+Phase 2 supplies complete score export, split/evaluation evidence and optimizer
+integration; it does not manufacture a statistically deployment-ready policy.
+See [SCORE_ARTIFACT.md](SCORE_ARTIFACT.md) for the workflow and streaming selection.
 
 ## Loading and exploratory compatibility
 
@@ -60,9 +61,9 @@ sampling is `first_N_numeric_sorted_frames` or `uniform_unique_frame_indices_v1`
 Window contracts require exactly `unit`, `sampling`, `profiles`, `aggregation`,
 `window_seconds`, `stride_seconds`, `sample_hz`. Their sampling is
 `paced_media_time_no_future_frames`; all three cadence values are finite positive
-numbers, not booleans. Validation defines their shape, not new sliding-window or
-custom streaming-policy execution support. Streaming policy injection remains
-Phase 2; neither offline entry accepts a window contract as a video contract.
+numbers, not booleans. They are validated against actual session settings for
+selected streaming policies. This does not add sliding windows or live sources;
+neither offline video entry accepts a window contract as a video contract.
 
 ## Entry-point gates
 
@@ -83,9 +84,10 @@ sampling at the requested limit, dlib81 for Xception/UCF and RetinaFace for SBI
 Its declared input contract is compared before preprocessing/output creation;
 all declared checkpoint/config/preprocessing hashes are compared before classifier
 inference. Asset checks can occur after shared raw decoding and retain error
-diagnostics if an output directory already exists. Existing profile fingerprints
-are unchanged; callers must use the actual entry's manifest/provenance, not copy
-a dataset-crop fingerprint into an uploaded-video policy.
+diagnostics if an output directory already exists. Callers must use the current
+entry's manifest/provenance, not copy a dataset-crop fingerprint into an upload
+policy. Phase 2 fingerprints additionally bind adapter implementation bytes and
+window cadence; older bound profiles require re-export rather than guessed hashes.
 
 `run_cascade` is the shared decision engine. It validates policy structure, but
 cannot inspect actual source samples or assets. Direct library callers must

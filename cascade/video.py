@@ -60,7 +60,7 @@ def run_video(video: Path, output: Path, *, policy_path: Path | None = None,
     try:
         update('validating', '檢查環境與模型')
         import torch
-        from .adapters import FrameDetectorAdapter
+        from .adapters import FrameDetectorAdapter, bind_face_profile
         target = torch.device(device)
         if target.type not in ('cpu', 'cuda') or (target.type == 'cuda' and not torch.cuda.is_available()):
             raise ValueError('指定的裝置無法使用；如需 CPU 請明確選擇 --device cpu')
@@ -93,11 +93,7 @@ def run_video(video: Path, output: Path, *, policy_path: Path | None = None,
                     sampling=SAMPLING, input_profile=cache.mapping[name]) for name in names}
         for name, adapter in adapters.items():
             definition=cache.profiles[cache.mapping[name]]['definition']
-            adapter.provenance['face_profile']=definition
-            adapter.provenance.setdefault('preprocessing',{})['aggregation']='max_face_then_mean_frame'
-            import hashlib
-            adapter.provenance['preprocessing_sha256']=hashlib.sha256(json.dumps(
-                dict(tensor=adapter.provenance['preprocessing'],face_profile=definition),sort_keys=True).encode()).hexdigest()
+            bind_face_profile(adapter, definition)
         validate_runtime_bindings(policy, {n:a.provenance for n,a in adapters.items()})
         manifest.update(preprocessing=cache.summary(),models={n:a.provenance for n,a in adapters.items()})
         atomic_json(output/'manifest.json',manifest)

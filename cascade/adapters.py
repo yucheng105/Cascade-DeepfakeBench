@@ -11,6 +11,17 @@ from .model_loader import load_model,sha256
 from .video_scoring import VideoScoreAccumulator, VideoScore
 
 
+def bind_face_profile(adapter, definition: dict, *, cadence: dict | None = None) -> None:
+    """One descriptor/hash algorithm for video export, upload and window runtime."""
+    adapter.provenance['face_profile'] = definition
+    tensor = adapter.provenance.setdefault('preprocessing', {})
+    tensor['aggregation'] = 'max_face_then_mean_frame'
+    if cadence is not None:
+        tensor['cadence'] = {k:cadence[k] for k in ('window_seconds','stride_seconds','sample_hz')}
+    adapter.provenance['preprocessing_sha256'] = hashlib.sha256(json.dumps(
+        dict(tensor=tensor,face_profile=definition),sort_keys=True).encode()).hexdigest()
+
+
 class FrameDetectorAdapter:
     def __init__(self, name: str, config_path: Path, checkpoint_path: Path, device,
                  batch_size: int = 16, warmup: bool = True, *,
@@ -33,7 +44,7 @@ class FrameDetectorAdapter:
             raise ValueError('Unsupported resize interpolation')
         profile=dict(resolution=self.config['resolution'],mean=self.config['mean'],std=self.config['std'],
                      resize='opencv_INTER_'+interpolation.upper(),color='RGB',aggregation='mean_frame_probability',
-                     input=input_profile,sampling=sampling)
+                     input=input_profile,sampling=sampling,adapter_implementation_sha256=sha256(Path(__file__)))
         if len(profile['mean'])!=3 or len(profile['std'])!=3 or any(x<=0 for x in profile['std']):
             raise ValueError('Invalid detector normalization')
         self.provenance: dict[str, Any]=dict(detector=name,checkpoint=str(self.checkpoint),checkpoint_sha256=sha256(self.checkpoint),

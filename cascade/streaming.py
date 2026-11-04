@@ -134,15 +134,15 @@ def _decoder(connection, video):
 
 class OfficialWindowEngine:
     """Reuse verified geometry and grouping; only transport/lifetime differ."""
-    def __init__(self, output, device, mode, face_model, cache_max_bytes):
+    def __init__(self, output, device, mode, face_model, cache_max_bytes, policy=None,
+                 window_seconds=4., sample_hz=2., configs=None, checkpoints=None):
         import torch
-        from .adapters import FrameDetectorAdapter
+        from .adapters import FrameDetectorAdapter, bind_face_profile
         from .face_profiles import build_faces
         from .offline import DEFAULT_CONFIGS, source_state
         from .model_loader import REPO_ROOT
         from .preprocessing import preflight, PROFILE_FOR_MODEL
-        from .video import POLICIES
-        from .policy import validate_policy
+        from .policy import frozen_policy, execution_contract, validate_runtime_input, validate_runtime_bindings
 
         self.output = Path(output)
         self.budget = cache_max_bytes
@@ -152,9 +152,14 @@ class OfficialWindowEngine:
         torch.manual_seed(1024)
         torch.backends.cudnn.benchmark = False
         torch.backends.cudnn.deterministic = True
-        names = ['xception', 'ucf', 'sbi']
-        self.policy = validate_policy(json.loads(POLICIES['early'].read_text(encoding='utf-8')),
-                                      'uploaded_video', allow_exploratory=True)
+        self.policy, policy_hash = frozen_policy(policy)
+        names = [s['detector'] for s in self.policy['stages']]
+        self.input_contract = execution_contract(names,unit='window',mode=mode,
+            window_seconds=window_seconds,sample_hz=sample_hz)
+        validate_runtime_input(self.policy, self.input_contract)
+        configs, checkpoints = configs or {}, checkpoints or {}
+        if (set(configs)|set(checkpoints))-set(names):
+            raise ValueError('Overrides name detectors absent from policy')
         self.definitions = preflight(mode, names, Path(face_model) if face_model is not None else MODEL_PATH)
         self.mapping = {n: PROFILE_FOR_MODEL[n] if mode == 'official' else 'yunet_legacy' for n in names}
         self.detectors = {p: build_faces(p, d['assets'], device) for p, d in self.definitions.items()}
@@ -171,20 +176,20 @@ class OfficialWindowEngine:
         weights = dict(xception='xception_best.pth', ucf='ucf_best.pth', sbi='FFc23.tar')
         self.adapters = {}
         for name in names:
-            adapter = FrameDetectorAdapter(name, DEFAULT_CONFIGS[name],
-                REPO_ROOT/'training/weights'/weights[name], device, batch_size=8,
-                sampling='paced_2Hz_nonoverlapping_4s', input_profile=self.mapping[name])
-            adapter.provenance['face_profile'] = self.definitions[self.mapping[name]]
-            adapter.provenance['preprocessing']['aggregation'] = 'max_face_then_mean_frame'
-            adapter.provenance['preprocessing_sha256'] = hashlib.sha256(json.dumps(dict(
-                tensor=adapter.provenance['preprocessing'], face_profile=adapter.provenance['face_profile']),
-                sort_keys=True).encode()).hexdigest()
-            expected = self.policy.get('preprocessing_sha256', {}).get(name)
-            if expected is not None and expected != adapter.provenance['preprocessing_sha256']:
-                raise ValueError('Policy preprocessing binding mismatch: '+name)
-            adapter.open()
+            adapter = FrameDetectorAdapter(name, Path(configs.get(name, DEFAULT_CONFIGS[name])),
+                Path(checkpoints.get(name, REPO_ROOT/'training/weights'/weights[name])), device, batch_size=8,
+                sampling=self.input_contract['sampling'], input_profile=self.mapping[name])
+            bind_face_profile(adapter, self.definitions[self.mapping[name]],cadence=self.input_contract)
             self.adapters[name] = adapter
+        try:
+            validate_runtime_bindings(self.policy,{n:a.provenance for n,a in self.adapters.items()})
+            for adapter in self.adapters.values():
+                adapter.open()
+        except Exception:
+            self.close()
+            raise
         self.provenance = dict(models={n:a.provenance for n,a in self.adapters.items()},
+            input_contract=self.input_contract, policy_sha256=policy_hash,
             profiles=self.definitions, model_profiles=self.mapping, policy=self.policy,
             source=source_state(), environment=dict(python=platform.python_version(), torch=torch.__version__,
                 cuda_runtime=torch.version.cuda, device=device,
@@ -195,7 +200,7 @@ class OfficialWindowEngine:
         self.scratch = self.output/'scratch'
         self.scratch.mkdir(exist_ok=True)
 
-    def infer(self, window):
+    def infer(self, window, *, full_scores=False):
         import cv2
         import torch
         from .controller import run_cascade
@@ -268,12 +273,29 @@ class OfficialWindowEngine:
                 def __init__(self, name):
                     self.name = name
                 def infer(self, records):
+                    prepared_started = time.perf_counter()
                     groups = prepare(self.name)
+                    prepare_seconds = time.perf_counter()-prepared_started
                     enriched = [dict(r, frames=[p for g in groups for p in g['faces']], face_groups=groups)
                                 for r in records]
-                    return engine.adapters[self.name].infer(enriched)
+                    scores,timing = engine.adapters[self.name].infer(enriched)
+                    timing['prepare_seconds'] = prepare_seconds
+                    return scores,timing
 
             try:
+                if full_scores:
+                    rows=[]
+                    for name in self.adapters:
+                        try:
+                            scores,timing=ReachedAdapter(name).infer([dict(video_name='window_'+str(window['index']),label=None)])
+                            if len(scores)!=1 or scores[0].video_name!='window_'+str(window['index']) or scores[0].label is not None or \
+                                    not math.isfinite(scores[0].score) or not 0<=scores[0].score<=1 or scores[0].frame_count<1:
+                                raise ValueError('Invalid full-score adapter output')
+                            rows.append(dict(detector=name,status='ok',score=scores[0].score,frames=scores[0].frame_count,timing=timing))
+                        except Exception as error:
+                            rows.append(dict(detector=name,status='no_faces' if isinstance(error,NoFaces) else 'failed',
+                                             score=None,frames=0,reason=str(error),timing={}))
+                    return dict(score_rows=rows,profiles=profile_results,planned_samples=len(window['samples']))
                 result = run_cascade([dict(video_name='window_'+str(window['index']), label=None)],
                     self.policy, {n:ReachedAdapter(n) for n in self.adapters}, on_trace=lambda rows:trace.__setitem__(slice(None),rows))
                 decision = result['decisions'][0]
@@ -394,8 +416,10 @@ class VideoSource:
 
 class ModelWorker:
     def __init__(self, output, *, device, preprocessing_mode, face_model, profile_timeout,
-                 cache_max_bytes, stop_event, **kwargs):
-        self.peer = Peer('infer', (str(output), device, preprocessing_mode, str(face_model), cache_max_bytes),
+                 cache_max_bytes, stop_event, policy=None, window_seconds=4., sample_hz=2.,
+                 configs=None, checkpoints=None, **kwargs):
+        self.peer = Peer('infer', (str(output), device, preprocessing_mode, str(face_model) if face_model else None,
+                         cache_max_bytes,policy,window_seconds,sample_hz,configs,checkpoints),
                          profile_timeout, stop_event)
         self.provenance = self.peer.initial
         # A user stop must let an already-running inference finish.
@@ -410,13 +434,21 @@ class StreamingSession:
     def __init__(self, video: Path, output: Path, *, device='cuda', preprocessing_mode='official',
                  face_model=None, profile_timeout=180, cache_max_bytes=512*1024*1024,
                  progress=None, source_factory=VideoSource, worker_factory=ModelWorker,
-                 window_seconds=4., sample_hz=2., original_filename=None, **kwargs):
+                 window_seconds=4., sample_hz=2., original_filename=None, policy=None,policy_path=None,
+                 configs=None,checkpoints=None, **kwargs):
         if not math.isfinite(profile_timeout) or profile_timeout <= 0 or cache_max_bytes < 1 or \
                 not math.isfinite(window_seconds) or window_seconds <= 0 or not math.isfinite(sample_hz) or sample_hz <= 0:
             raise ValueError('Invalid streaming budget or cadence')
         self.video, self.output = video, output
+        from .policy import frozen_policy, execution_contract, validate_runtime_input
+        selected, policy_hash = frozen_policy(policy,path=policy_path)
+        actual = execution_contract([s['detector'] for s in selected['stages']],unit='window',mode=preprocessing_mode,
+                                    window_seconds=window_seconds,sample_hz=sample_hz)
+        validate_runtime_input(selected,actual)
         self.settings = dict(device=device, preprocessing_mode=preprocessing_mode, face_model=face_model,
-                             profile_timeout=profile_timeout, cache_max_bytes=cache_max_bytes)
+                             profile_timeout=profile_timeout, cache_max_bytes=cache_max_bytes,
+                             policy=selected,window_seconds=window_seconds,sample_hz=sample_hz,
+                             configs=configs,checkpoints=checkpoints)
         self.progress = progress or (lambda phase, message: None)
         self.source_factory, self.worker_factory = source_factory, worker_factory
         self.window_seconds, self.sample_hz = window_seconds, sample_hz
@@ -429,6 +461,7 @@ class StreamingSession:
         self.failure: Exception | None = None
         self.started = 0.
         self.report: dict[str, Any] = dict(schema_version=3, analysis_mode='stream', phase='starting',
+            policy=selected,policy_sha256=policy_hash,input_contract=actual,
             original_filename=original_filename or video.name, ground_truth=None, deployment_ready=False,
             calibration_status='not_calibrated_for_profile', windows=self.rows,
             window_seconds=window_seconds, sample_hz=sample_hz, stride_seconds=window_seconds,

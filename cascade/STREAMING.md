@@ -32,3 +32,11 @@
 
 測試：`python -B -m unittest cascade.tests.test_streaming cascade.tests.test_streaming_profiles -v`。
 HTTP 測試使用可控來源與模型；真實 GPU、官方參考及瀏覽器驗收另存 workspace 證據。
+# Phase 2 policy selection
+
+Register a frozen window policy using `--stream-policy NAME=JSON` on the demo
+server, then select its registered identity in the existing policy selector.
+The job/manifest/report retains policy content, canonical hash and actual model
+order. Only active detectors are initialized; declared cadence/profile/asset
+mismatches fail before classifier loading. Defaults remain exploratory. See
+[SCORE_ARTIFACT.md](SCORE_ARTIFACT.md) for complete-score export and asset maps.

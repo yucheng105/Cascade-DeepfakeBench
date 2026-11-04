@@ -85,3 +85,14 @@ test('changing analysis mode clears the previous mode result',()=>{
   assert.equal(p.el('decision-empty').hidden,false);
   assert.equal(p.el('mode-label').textContent,'離線分析');
 });
+
+test('streaming renders the selected policy subset and exposes its identity',()=>{
+  const p=page();p.ctx.job=structuredClone(windowJob);
+  p.ctx.job.report.policy={policy_id:'ucf-only',stages:[{detector:'ucf',low:.5,high:.5}]};
+  p.ctx.job.report.windows[0].trace=[{...trace,detector:'ucf'}];
+  p.run('showStream(job)');
+  assert.equal(p.el('cascade-path').children.length,1);
+  assert.match(p.el('cascade-path').textContent,/UCF/);
+  assert.doesNotMatch(p.el('cascade-path').textContent,/Xception|SBI/);
+  assert.match(p.el('stream-summary').textContent,/ucf-only/);
+});
