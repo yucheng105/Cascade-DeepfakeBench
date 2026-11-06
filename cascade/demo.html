@@ -43,11 +43,18 @@ main.shell{padding-bottom:44px}
 .panel{background:var(--paper);border:1px solid var(--line);border-radius:var(--radius)}
 .controls{padding:20px 24px;margin-bottom:24px}
 .control-row{display:grid;grid-template-columns:minmax(260px,1fr) minmax(230px,.66fr) auto;gap:24px;align-items:end}
+.control-row>div{min-width:0}
+.actions{display:flex;align-items:center;gap:8px}
+.actions button{white-space:nowrap;min-height:44px}
 .field-label{display:block;font-size:12px;color:var(--muted);margin-bottom:7px}
 .file-picker{display:flex;align-items:center;gap:12px;min-width:0}
 .file-picker input{min-width:0;width:100%;font-size:12px;color:var(--muted)}
 input::file-selector-button{background:var(--blue-soft);color:var(--blue);border:1px solid #c8d8f5;border-radius:7px;font:inherit;font-size:13px;font-weight:600;padding:10px 14px;margin-right:12px;cursor:pointer}
-select{width:100%;min-height:42px;padding:8px 32px 8px 12px;background:var(--paper);border:1px solid #b8c6d8;border-radius:7px;color:var(--text);font-size:13px}
+select,input[type="number"]{width:100%;min-width:0;height:44px;padding:9px 12px;background:var(--paper);border:1px solid #b8c6d8;border-radius:7px;color:var(--text);font-size:13px;line-height:1.5}
+select{padding-right:36px}
+select:hover:not(:disabled),input[type="number"]:hover:not(:disabled){border-color:#8198b6}
+select:disabled,input[type="number"]:disabled{background:var(--bg);color:var(--muted);cursor:not-allowed}
+.controls select:focus-visible,.controls input[type="number"]:focus-visible{outline:2px solid var(--blue);outline-offset:2px;border-color:var(--blue)}
 .primary{min-height:44px;background:var(--blue);color:white;padding:10px 27px;border-radius:7px;font-size:14px;font-weight:600}
 .secondary{background:var(--paper);border:1px solid var(--line);color:var(--text);border-radius:7px;padding:9px 12px;font-size:13px}
 .primary:hover:not(:disabled){background:#1b4fae}
@@ -56,6 +63,13 @@ select{width:100%;min-height:42px;padding:8px 32px 8px 12px;background:var(--pap
 .check{display:flex;gap:8px;align-items:flex-start;color:var(--muted);font-size:12px}
 .check input{accent-color:var(--blue);width:15px;height:15px;margin:3px 0 0;flex-shrink:0}
 .limits{font-size:11px;color:var(--muted);margin-top:7px}
+.cadence-controls{display:grid;grid-template-columns:minmax(230px,2fr) repeat(3,minmax(100px,1fr));gap:14px 16px;align-items:start;margin-top:18px;padding:18px 0 0;border-top:1px solid var(--line)}
+.cadence-field{display:flex;flex-direction:column;gap:7px;min-width:0;font-size:12px;color:var(--muted)}
+.input-unit{position:relative;display:block}
+.input-unit input{padding-right:64px;font-variant-numeric:tabular-nums}
+.input-unit>span{position:absolute;right:34px;top:50%;transform:translateY(-50%);font-size:12px;pointer-events:none}
+.cadence-controls .note{grid-column:1/-1;color:var(--muted);font-size:11px;max-width:85ch}
+#stream-note{margin-top:14px;padding:10px 12px;border-left:3px solid #d9b46e;background:var(--amber-soft);border-radius:0 5px 5px 0;max-width:95ch}
 .advanced{margin-top:14px;border-top:1px solid var(--line);padding-top:10px;font-size:13px}
 .advanced summary{width:fit-content;color:var(--muted)}
 .advanced-grid{display:grid;grid-template-columns:1fr 1fr;gap:22px;padding:16px 0}
@@ -157,6 +171,8 @@ td:first-child{white-space:nowrap}
 }
 @media(max-width:1000px){.shell{padding-left:24px;padding-right:24px}
 .control-row{gap:14px;grid-template-columns:1fr 1fr}
+.cadence-controls{grid-template-columns:repeat(3,minmax(0,1fr))}
+.cadence-contract{grid-column:1/-1}
 .actions{grid-column:1/-1;display:flex;gap:10px}
 .primary{flex:1}
 .workspace{grid-template-columns:minmax(0,1.1fr) minmax(320px,1fr)}
@@ -176,6 +192,7 @@ header{min-height:68px}
 .actions{grid-column:auto}
 .controls{padding:18px}
 .control-foot{align-items:flex-start;flex-direction:column;gap:10px}
+.cadence-controls{gap:14px 12px}
 .advanced-grid{grid-template-columns:1fr;gap:16px}
 .workspace{grid-template-columns:1fr}
 .media-panel{border-right:0;border-bottom:1px solid var(--line);padding:18px}
@@ -192,6 +209,7 @@ header{min-height:68px}
 .media-meta{align-items:flex-start}
 .history-panel{padding:18px}
 }
+@media(max-width:420px){.cadence-controls{grid-template-columns:1fr}.cadence-contract{grid-column:auto}.actions{flex-wrap:wrap}.actions .secondary{flex:1}}
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{transition:none!important;animation:none!important;scroll-behavior:auto!important}
 }
 </style>
@@ -204,7 +222,13 @@ header{min-height:68px}
 <div class="control-row"><div><label class="field-label" for="file">選擇分析影片</label><div class="file-picker"><input id="file" type="file" accept="video/mp4,.mp4" aria-label="選擇 MP4 影片"></div></div><div><label class="field-label" for="analysis-mode">分析方式</label><select id="analysis-mode"><option value="offline">離線分析 · 全片取樣</option><option value="offline_window">離線 Window · 逐窗分析</option><option value="stream">模擬即時串流 · 4 秒一窗</option></select></div><div class="actions"><button id="submit" class="primary">開始分析影片</button> <button id="stop" class="secondary" hidden disabled>停止串流</button></div></div>
 <p id="limits" class="limits">MP4 · ≤200 MiB · ≤1200 秒（20 分鐘） · ≤1920×1080 像素 · 最多 32 幀</p>
 <div class="control-foot"><label class="check"><input id="consent" type="checkbox"><span>我了解此為探索性研究展示，尚未完成正式模型效能驗收。</span></label><span class="small muted">每次分析一支影片</span></div>
-<div id="cadence-controls" hidden><label>取樣契約 <select id="window-contract"><option value="1">保留既有 MP4 取樣</option><option value="2">共用滑窗取樣（須相容 Policy）</option></select></label> <label>Window 秒 <input id="window-seconds" type="number" min="0.01" value="4" step="0.5"></label> <label>Stride 秒 <input id="stride-seconds" type="number" min="0.01" value="4" step="0.5"></label> <label>取樣 Hz <input id="sample-hz" type="number" min="0.01" value="2" step="0.5"></label><p class="note">調整 cadence 使用新版 Window domain；須使用相容 Policy。預設串流保留舊版 4/4 秒契約。</p></div>
+<div id="cadence-controls" class="cadence-controls" hidden>
+<label class="cadence-field cadence-contract" for="window-contract">取樣契約<select id="window-contract" aria-describedby="cadence-help"><option value="1">保留既有 MP4 取樣</option><option value="2">共用滑窗取樣（須相容 Policy）</option></select></label>
+<label class="cadence-field" for="window-seconds">時間窗長度 · Window<span class="input-unit"><input id="window-seconds" type="number" min="0.01" value="4" step="0.5" aria-describedby="cadence-help" aria-label="時間窗長度（秒）"><span aria-hidden="true">秒</span></span></label>
+<label class="cadence-field" for="stride-seconds">滑動間隔 · Stride<span class="input-unit"><input id="stride-seconds" type="number" min="0.01" value="4" step="0.5" aria-describedby="cadence-help" aria-label="滑動間隔（秒）"><span aria-hidden="true">秒</span></span></label>
+<label class="cadence-field" for="sample-hz">取樣頻率<span class="input-unit"><input id="sample-hz" type="number" min="0.01" value="2" step="0.5" aria-describedby="cadence-help" aria-label="取樣頻率（Hz）"><span aria-hidden="true">Hz</span></span></label>
+<p id="cadence-help" class="note">調整時間窗或取樣頻率時，須使用相容的 Policy。預設串流沿用 4 秒時間窗、4 秒滑動間隔。</p>
+</div>
 <p id="stream-note" class="note" hidden>模型暖機後才原速播放，每秒取樣 2 幀。過載時保留最新等待窗，缺口會列為未分析。播放預設靜音；不支援暫停、跳轉或人物追蹤。</p>
 <details class="advanced"><summary>進階設定與取樣說明</summary><div class="advanced-grid"><div><label for="preprocessing-mode">人臉前處理</label><select id="preprocessing-mode"><option value="official">官方流程 · dlib / RetinaFace</option><option value="legacy">舊 YuNet · 僅供比較</option></select></div><div><label for="policy">Cascade 展示政策</label><select id="policy"><option value="early">Early Exit · 雙門檻 0.2 / 0.8</option><option value="all_stages">全階段展示 · 前兩關 0 / 1</option></select><p class="note">全階段政策鼓勵樣本續傳；分數恰為 0 或 1 時仍依門檻規則退場。</p></div></div><p class="method-note">離線模式全片最多均勻抽取 32 幀，長影片取樣較稀疏，可能漏掉短暫換臉。解碼超過 180 秒、各人臉流程超過設定時間，或超出快取預算時會停止並顯示失敗。Xception／UCF 分析最大臉；官方 SBI 保留合格多臉並逐幀取最高分。不進行人物追蹤。</p></details>
 </section>
